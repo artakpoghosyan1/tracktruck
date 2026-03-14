@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { Map, LayoutDashboard, Truck, Settings, LogOut, Loader2 } from "lucide-react";
-import { useAuthMe } from "@workspace/api-client-react";
+import { useAuthMe, getAuthMeQueryKey } from "@workspace/api-client-react";
 import { useAppStore } from "@/store/use-app-store";
 
 export function AdminLayout({ children }: { children: ReactNode }) {
@@ -10,8 +10,9 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   
   const { data: user, isLoading, isError } = useAuthMe({
     query: {
+      queryKey: getAuthMeQueryKey(),
       retry: false,
-    }
+    },
   });
 
   if (isLoading) {

@@ -1,10 +1,23 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "wouter";
 import Map, { Marker, Source, Layer, MapRef } from "react-map-gl";
+import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Truck, Navigation, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useAppStore } from "@/store/use-app-store";
-import { useGetPublicTrack } from "@workspace/api-client-react";
+import { useGetPublicTrack, getGetPublicTrackQueryKey } from "@workspace/api-client-react";
+
+interface SnapshotData {
+  type?: string;
+  routeId: number;
+  timestamp: string;
+  status: string;
+  distanceTraveledM: number;
+  progressPercent: number;
+  lat: number | null;
+  lng: number | null;
+  bearing: number | null;
+}
 
 export default function PublicTracking() {
   const { token } = useParams<{ token: string }>();
@@ -12,10 +25,10 @@ export default function PublicTracking() {
   const mapRef = useRef<MapRef>(null);
   
   const { data: route, isLoading, isError } = useGetPublicTrack(token || "", {
-    query: { enabled: !!token, retry: false }
+    query: { queryKey: getGetPublicTrackQueryKey(token || ""), enabled: !!token, retry: false }
   });
 
-  const [snapshot, setSnapshot] = useState<any>(null);
+  const [snapshot, setSnapshot] = useState<SnapshotData | null>(null);
   const [wsError, setWsError] = useState(false);
 
   useEffect(() => {

@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { 
   Plus, Search, MoreVertical, Play, Pause, SquareSquare, 
-  RotateCcw, Trash2, Link as LinkIcon, ExternalLink, Edit
+  RotateCcw, Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { 
@@ -48,8 +48,9 @@ export default function Dashboard() {
         }
       }
       toast({ title: "Success", description: `Action ${action} completed.` });
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message || "Action failed", variant: "destructive" });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Action failed";
+      toast({ title: "Error", description: message, variant: "destructive" });
     }
   };
 

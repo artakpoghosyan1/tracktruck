@@ -1,20 +1,22 @@
 import { Router, type IRouter } from "express";
+import { AuthSignupBody, AuthLoginBody, AuthGoogleBody, AuthRefreshBody } from "@workspace/api-zod";
+import { validate } from "../middlewares/validate";
 
 const router: IRouter = Router();
 
-router.post("/auth/signup", async (req, res) => {
+router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res) => {
   res.status(501).json({ error: "not_implemented", message: "Signup not yet implemented" });
 });
 
-router.post("/auth/login", async (req, res) => {
+router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) => {
   res.status(501).json({ error: "not_implemented", message: "Login not yet implemented" });
 });
 
-router.post("/auth/google", async (req, res) => {
+router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res) => {
   res.status(501).json({ error: "not_implemented", message: "Google auth not yet implemented" });
 });
 
-router.post("/auth/refresh", async (req, res) => {
+router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, res) => {
   res.status(501).json({ error: "not_implemented", message: "Token refresh not yet implemented" });
 });
 

@@ -20,10 +20,10 @@ export default function Login() {
         toast({ title: "Welcome back!", description: "Successfully signed in." });
         setLocation("/admin");
       },
-      onError: (err: any) => {
+      onError: (err: Error) => {
         toast({ 
           title: "Login failed", 
-          description: err?.response?.data?.message || "Invalid credentials",
+          description: err.message || "Invalid credentials",
           variant: "destructive"
         });
       }

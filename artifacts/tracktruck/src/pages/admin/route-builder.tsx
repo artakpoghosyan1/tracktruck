@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation, useParams } from "wouter";
+import { Link, useLocation, useParams } from "wouter";
 import Map, { Marker, Source, Layer, MapRef } from "react-map-gl";
+import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { 
   ArrowLeft, Save, CreditCard, Truck, Route as RouteIcon, MapPin, 
@@ -15,7 +16,7 @@ import { MapboxPrompt } from "@/components/MapboxPrompt";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections } from "@/lib/mapbox-utils";
-import { useCreateRoute, useUpdateRoute, useGetRoute, useCreatePayment } from "@workspace/api-client-react";
+import { useCreateRoute, useUpdateRoute, useGetRoute, useCreatePayment, getGetRouteQueryKey } from "@workspace/api-client-react";
 
 interface Stop {
   id: string; // temp client ID
@@ -27,7 +28,14 @@ interface Stop {
   dbId?: number;
 }
 
-function SortableStopItem({ stop, onRemove, onChangeName, onChangeDuration }: any) {
+interface SortableStopItemProps {
+  stop: Stop;
+  onRemove: (id: string) => void;
+  onChangeName: (id: string, val: string) => void;
+  onChangeDuration: (id: string, val: number) => void;
+}
+
+function SortableStopItem({ stop, onRemove, onChangeName, onChangeDuration }: SortableStopItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -84,7 +92,7 @@ export default function RouteBuilder() {
   const [duration, setDuration] = useState(0);
   const [mapMode, setMapMode] = useState<'idle'|'start'|'end'|'stop'>('idle');
 
-  const { data: existingRoute } = useGetRoute(routeId || 0, { query: { enabled: !!routeId } });
+  const { data: existingRoute } = useGetRoute(routeId || 0, { query: { queryKey: getGetRouteQueryKey(routeId || 0), enabled: !!routeId } });
   const createMut = useCreateRoute();
   const updateMut = useUpdateRoute();
   const paymentMut = useCreatePayment();
@@ -184,9 +192,6 @@ export default function RouteBuilder() {
       let savedRoute;
       if (routeId) {
         savedRoute = await updateMut.mutateAsync({ id: routeId, data: payload });
-        // Handling stops update efficiently is complex in one go, a real backend would accept nested writes.
-        // Assuming we rely on the primary route update for this prototype, or missing stop mutations.
-        // For a true app, we would loop over `useCreateStop`, `useUpdateStop`, `useDeleteStop`.
       } else {
         savedRoute = await createMut.mutateAsync({ data: payload });
         // Create stops sequentially
@@ -209,8 +214,9 @@ export default function RouteBuilder() {
       }
 
       setLocation('/admin');
-    } catch (err: any) {
-      toast({ title: "Error saving route", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save route";
+      toast({ title: "Error saving route", description: message, variant: "destructive" });
     }
   };
 

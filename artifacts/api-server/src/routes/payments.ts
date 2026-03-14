@@ -1,8 +1,10 @@
 import { Router, type IRouter } from "express";
+import { CreatePaymentBody } from "@workspace/api-zod";
+import { validate } from "../middlewares/validate";
 
 const router: IRouter = Router();
 
-router.post("/payments/create", async (req, res) => {
+router.post("/payments/create", validate({ body: CreatePaymentBody }), async (req, res) => {
   res.status(501).json({ error: "not_implemented", message: "Create payment not yet implemented" });
 });
 
