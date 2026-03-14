@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import app from "./app";
 import { setupWebSocket } from "./routes/ws";
+import { startSimulationEngine } from "./lib/simulation-engine";
 
 const rawPort = process.env["PORT"];
 
@@ -19,6 +20,7 @@ if (Number.isNaN(port) || port <= 0) {
 const server = createServer(app);
 
 setupWebSocket(server);
+startSimulationEngine();
 
 server.listen(port, () => {
   console.log(`Server listening on port ${port}`);

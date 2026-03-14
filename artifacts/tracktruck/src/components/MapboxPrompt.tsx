@@ -1,23 +1,31 @@
 import { useState } from "react";
 import { useAppStore } from "@/store/use-app-store";
-import { MapPin, KeyRound, CheckCircle2 } from "lucide-react";
+import { MapPin, KeyRound, CheckCircle2, X } from "lucide-react";
 
 export function MapboxPrompt() {
   const { mapboxToken, setMapboxToken } = useAppStore();
   const [tokenInput, setTokenInput] = useState("");
   const [isOpen, setIsOpen] = useState(!mapboxToken);
 
-  if (!isOpen && mapboxToken) return null;
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="bg-card w-full max-w-md p-8 rounded-3xl shadow-2xl border border-border/50 animate-in fade-in zoom-in duration-300">
+      <div className="bg-card w-full max-w-md p-8 rounded-3xl shadow-2xl border border-border/50 animate-in fade-in zoom-in duration-300 relative">
+        <button
+          onClick={() => setIsOpen(false)}
+          className="absolute top-4 right-4 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          aria-label="Dismiss"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
         <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
           <MapPin className="w-6 h-6 text-primary" />
         </div>
         <h2 className="text-2xl font-bold text-foreground mb-2">Mapbox Configuration</h2>
         <p className="text-muted-foreground mb-6">
-          TrackTruck Live requires a public Mapbox token to render maps and calculate route directions.
+          TrackTruck Live uses Mapbox to render maps and calculate route directions. Enter your free Mapbox public token below.
         </p>
         
         <div className="space-y-4">
@@ -48,9 +56,16 @@ export function MapboxPrompt() {
             <CheckCircle2 className="w-5 h-5" />
             Save Configuration
           </button>
+
+          <button
+            onClick={() => setIsOpen(false)}
+            className="w-full py-2.5 px-4 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-xl transition-colors font-medium"
+          >
+            Skip for now (map disabled)
+          </button>
         </div>
-        <div className="mt-6 text-xs text-center text-muted-foreground">
-          Don't have one? Get it for free at <a href="https://mapbox.com" target="_blank" rel="noreferrer" className="text-primary hover:underline">mapbox.com</a>
+        <div className="mt-4 text-xs text-center text-muted-foreground">
+          Get a free token at <a href="https://mapbox.com" target="_blank" rel="noreferrer" className="text-primary hover:underline">mapbox.com</a>
         </div>
       </div>
     </div>

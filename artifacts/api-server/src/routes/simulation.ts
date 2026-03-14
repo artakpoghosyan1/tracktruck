@@ -1,4 +1,7 @@
 import { Router, type IRouter } from "express";
+import { eq, and, isNull } from "drizzle-orm";
+import crypto from "crypto";
+import { db, routesTable, simulationStatesTable, shareLinksTable, paymentOrdersTable } from "@workspace/db";
 import {
   ActivateRouteParams,
   StartRouteParams,
@@ -8,31 +11,233 @@ import {
   RecalculateRouteParams,
 } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
+import { requireAuth, type AuthRequest } from "../middlewares/auth";
+import { positionAlongPolyline, totalPolylineDistance } from "../lib/geo";
 
 const router: IRouter = Router();
 
+router.use(requireAuth());
+
 router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Activate route not yet implemented" });
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"]!);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route) {
+    res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  if (route.status !== "draft") {
+    res.status(400).json({ error: "bad_request", message: `Route cannot be activated from status: ${route.status}` });
+    return;
+  }
+
+  // Create mock payment
+  const paymentReference = `PAY-${crypto.randomBytes(8).toString("hex").toUpperCase()}`;
+  const [payment] = await db
+    .insert(paymentOrdersTable)
+    .values({
+      routeId,
+      userId: authReq.userId,
+      amount: 5000,
+      currency: "AMD",
+      status: "paid",
+      paymentReference,
+      transactionId: `TXN-${crypto.randomBytes(6).toString("hex").toUpperCase()}`,
+      paidAt: new Date(),
+    })
+    .returning();
+
+  // Move route to ready
+  await db.update(routesTable).set({ status: "ready", updatedAt: new Date() }).where(eq(routesTable.id, routeId));
+
+  // Create share token
+  const token = crypto.randomBytes(16).toString("hex");
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await db.update(shareLinksTable).set({ active: false }).where(eq(shareLinksTable.routeId, routeId));
+  await db.insert(shareLinksTable).values({ routeId, token, active: true, expiresAt });
+
+  // Ensure simulation state exists
+  const existingSim = await db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, routeId)).limit(1);
+  if (existingSim.length === 0) {
+    await db.insert(simulationStatesTable).values({
+      routeId,
+      effectiveElapsedMs: 0,
+      distanceTraveledM: 0,
+      progressPercent: 0,
+    });
+  } else {
+    await db.update(simulationStatesTable)
+      .set({ effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0, startedAt: null, pausedAt: null, updatedAt: new Date() })
+      .where(eq(simulationStatesTable.routeId, routeId));
+  }
+
+  res.json({
+    routeId,
+    status: "ready",
+    shareToken: token,
+    paymentId: payment.id,
+    paymentStatus: "paid",
+  });
 });
 
 router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Start route not yet implemented" });
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"]!);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route) {
+    res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  if (route.status !== "ready") {
+    res.status(400).json({ error: "bad_request", message: `Route cannot be started from status: ${route.status}` });
+    return;
+  }
+
+  const now = new Date();
+  await db.update(routesTable).set({ status: "in_progress", updatedAt: now }).where(eq(routesTable.id, routeId));
+
+  const existingSim = await db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, routeId)).limit(1);
+  if (existingSim.length === 0) {
+    await db.insert(simulationStatesTable).values({
+      routeId,
+      effectiveElapsedMs: 0,
+      distanceTraveledM: 0,
+      progressPercent: 0,
+      startedAt: now,
+    });
+  } else {
+    await db.update(simulationStatesTable)
+      .set({ startedAt: now, pausedAt: null, updatedAt: now })
+      .where(eq(simulationStatesTable.routeId, routeId));
+  }
+
+  res.json({ routeId, status: "in_progress", startedAt: now.toISOString(), effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0 });
 });
 
 router.post("/routes/:id/pause", validate({ params: PauseRouteParams }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Pause route not yet implemented" });
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"]!);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route || route.status !== "in_progress") {
+    res.status(400).json({ error: "bad_request", message: "Route is not in progress" });
+    return;
+  }
+
+  const [simState] = await db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, routeId)).limit(1);
+
+  const now = new Date();
+  const wallElapsedMs = simState?.startedAt ? now.getTime() - simState.startedAt.getTime() : 0;
+  const totalElapsedMs = (simState?.effectiveElapsedMs ?? 0) + wallElapsedMs;
+
+  await db.update(routesTable).set({ status: "paused", updatedAt: now }).where(eq(routesTable.id, routeId));
+  await db.update(simulationStatesTable)
+    .set({ pausedAt: now, startedAt: null, effectiveElapsedMs: totalElapsedMs, updatedAt: now })
+    .where(eq(simulationStatesTable.routeId, routeId));
+
+  res.json({ routeId, status: "paused", effectiveElapsedMs: totalElapsedMs });
 });
 
 router.post("/routes/:id/resume", validate({ params: ResumeRouteParams }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Resume route not yet implemented" });
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"]!);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route || route.status !== "paused") {
+    res.status(400).json({ error: "bad_request", message: "Route is not paused" });
+    return;
+  }
+
+  const now = new Date();
+  await db.update(routesTable).set({ status: "in_progress", updatedAt: now }).where(eq(routesTable.id, routeId));
+  await db.update(simulationStatesTable)
+    .set({ startedAt: now, pausedAt: null, updatedAt: now })
+    .where(eq(simulationStatesTable.routeId, routeId));
+
+  res.json({ routeId, status: "in_progress" });
 });
 
 router.post("/routes/:id/reset", validate({ params: ResetRouteParams }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Reset route not yet implemented" });
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"]!);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route) {
+    res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  const allowedStatuses = ["in_progress", "paused", "completed"];
+  if (!allowedStatuses.includes(route.status)) {
+    res.status(400).json({ error: "bad_request", message: `Route cannot be reset from status: ${route.status}` });
+    return;
+  }
+
+  const now = new Date();
+  await db.update(routesTable).set({ status: "ready", updatedAt: now }).where(eq(routesTable.id, routeId));
+  await db.update(simulationStatesTable)
+    .set({ effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0, startedAt: null, pausedAt: null, updatedAt: now })
+    .where(eq(simulationStatesTable.routeId, routeId));
+
+  // Re-activate share link
+  await db.update(shareLinksTable).set({ active: true }).where(eq(shareLinksTable.routeId, routeId));
+
+  res.json({ routeId, status: "ready" });
 });
 
 router.post("/routes/:id/recalculate", validate({ params: RecalculateRouteParams }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Recalculate route not yet implemented" });
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"]!);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route) {
+    res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  const polyline = (route.polyline as number[][]) || [];
+  const distanceM = polyline.length > 1 ? totalPolylineDistance(polyline) : route.distanceM;
+  const estimatedDurationS = route.truckSpeedKmh > 0 ? (distanceM / 1000 / route.truckSpeedKmh) * 3600 : route.estimatedDurationS;
+
+  await db.update(routesTable)
+    .set({ distanceM, estimatedDurationS, updatedAt: new Date() })
+    .where(eq(routesTable.id, routeId));
+
+  res.json({ routeId, distanceM, estimatedDurationS });
 });
 
 export default router;

@@ -56,6 +56,38 @@ Tables defined in `lib/db/src/schema/`:
 Route statuses: draft, ready, in_progress, paused, completed, expired
 Payment statuses: pending, authorized, paid, failed, expired, refunded
 
+## Implementation Status
+
+All features are **fully implemented**:
+- ✅ Auth: JWT signup, login, refresh, logout, /me endpoint
+- ✅ Routes CRUD: create, list (paginated/searchable/filterable), get, update, soft-delete
+- ✅ Stops CRUD: create, update, delete nested under routes
+- ✅ Payment flow: mock auto-paid payment, creates share token, moves route to "ready"
+- ✅ Simulation engine: real-time truck position along polyline via setInterval (2s ticks), WebSocket broadcast
+- ✅ Simulation controls: activate, start, pause, resume, reset, recalculate
+- ✅ Public tracking: `/public/track/:token` REST + WebSocket at `/api/public/ws/track/:token`
+- ✅ Admin dashboard with route table, status filter, search, pagination, action buttons
+- ✅ Route builder with Mapbox map, drag-and-drop stops, save draft + activate flow
+- ✅ Mapbox prompt is dismissable ("Skip for now" button)
+
+## Auth Implementation
+
+- `bcryptjs` for password hashing
+- `jsonwebtoken` for JWT (access=15min, refresh=7d)
+- JWT secret from `JWT_SECRET` env var (fallback dev secret)
+- Auth middleware in `src/middlewares/auth.ts`
+- JWT interceptor in frontend `src/lib/api-interceptor.ts` auto-injects Bearer token
+
+## Simulation Engine
+
+Located at `src/lib/simulation-engine.ts`. Ticks every 2 seconds:
+1. Queries all `in_progress` routes with their simulation states
+2. Calculates elapsed time from `startedAt` + `effectiveElapsedMs`
+3. Uses truck speed to compute `distanceTraveledM`
+4. Computes lat/lng/bearing via `positionAlongPolyline()` in `src/lib/geo.ts`
+5. Broadcasts snapshot to all WebSocket clients for each route's share token
+6. When progress reaches 100%: marks route `completed`, deactivates share links
+
 ## API Endpoints
 
 All endpoints prefixed with `/api`:
