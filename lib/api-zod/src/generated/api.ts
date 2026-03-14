@@ -623,6 +623,18 @@ export const GetPublicTrackResponse = zod.object({
 });
 
 /**
+ * Upgrade to WebSocket connection for real-time truck position updates.
+Client connects via ws(s)://<host>/api/public/ws/track/{token}.
+Server pushes LiveSnapshotResponse JSON messages at regular intervals.
+Connection closes when route completes or token expires.
+
+ * @summary WebSocket endpoint for live truck tracking
+ */
+export const WsPublicTrackParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+/**
  * @summary Get current simulation state
  */
 export const GetPublicTrackStateParams = zod.object({

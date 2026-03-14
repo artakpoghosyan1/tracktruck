@@ -2162,6 +2162,98 @@ export function useGetPublicTrack<
 }
 
 /**
+ * Upgrade to WebSocket connection for real-time truck position updates.
+Client connects via ws(s)://<host>/api/public/ws/track/{token}.
+Server pushes LiveSnapshotResponse JSON messages at regular intervals.
+Connection closes when route completes or token expires.
+
+ * @summary WebSocket endpoint for live truck tracking
+ */
+export const getWsPublicTrackUrl = (token: string) => {
+  return `/api/public/ws/track/${token}`;
+};
+
+export const wsPublicTrack = async (
+  token: string,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getWsPublicTrackUrl(token), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getWsPublicTrackQueryKey = (token: string) => {
+  return [`/api/public/ws/track/${token}`] as const;
+};
+
+export const getWsPublicTrackQueryOptions = <
+  TData = Awaited<ReturnType<typeof wsPublicTrack>>,
+  TError = ErrorType<void | ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof wsPublicTrack>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getWsPublicTrackQueryKey(token);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof wsPublicTrack>>> = ({
+    signal,
+  }) => wsPublicTrack(token, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!token,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof wsPublicTrack>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type WsPublicTrackQueryResult = NonNullable<
+  Awaited<ReturnType<typeof wsPublicTrack>>
+>;
+export type WsPublicTrackQueryError = ErrorType<void | ErrorResponse>;
+
+/**
+ * @summary WebSocket endpoint for live truck tracking
+ */
+
+export function useWsPublicTrack<
+  TData = Awaited<ReturnType<typeof wsPublicTrack>>,
+  TError = ErrorType<void | ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof wsPublicTrack>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getWsPublicTrackQueryOptions(token, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary Get current simulation state
  */
 export const getGetPublicTrackStateUrl = (token: string) => {

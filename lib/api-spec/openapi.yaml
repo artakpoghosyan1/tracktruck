@@ -610,6 +610,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /public/ws/track/{token}:
+    get:
+      operationId: wsPublicTrack
+      tags: [public]
+      summary: WebSocket endpoint for live truck tracking
+      description: |
+        Upgrade to WebSocket connection for real-time truck position updates.
+        Client connects via ws(s)://<host>/api/public/ws/track/{token}.
+        Server pushes LiveSnapshotResponse JSON messages at regular intervals.
+        Connection closes when route completes or token expires.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade successful
+        "404":
+          description: Token not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      x-websocket:
+        messages:
+          snapshot:
+            $ref: "#/components/schemas/LiveSnapshotResponse"
+
   /public/track/{token}/state:
     get:
       operationId: getPublicTrackState
