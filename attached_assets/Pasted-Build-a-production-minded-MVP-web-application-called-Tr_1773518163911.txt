@@ -1,0 +1,430 @@
+Build a production-minded MVP web application called TrackTruck Live.
+The application allows an admin user to create a truck route on a map, activate the route by paying, start the route simulation, and then share a public link where viewers can watch the truck move live along the route.
+The system simulates a truck traveling along a predefined route and ensures that all viewers see the same truck position at the same time, even if they open the link later.
+Domain structure
+The application will run on:
+Admin panel
+ tracktruck.live/admin
+Public route pages
+ tracktruck.live/[id]
+Where [id] is a share token generated when a route is activated after payment.
+Admin users manage routes from /admin.
+ Public viewers open /[id] to watch the truck move live.
+Core technology stack
+Frontend
+React with TypeScript
+
+
+Vite
+
+
+Tailwind CSS
+
+
+React Router
+
+
+TanStack Query
+
+
+Mapbox GL JS for maps
+
+
+shadcn/ui for all UI components
+
+
+WebSocket client
+
+
+Backend
+Python only
+
+
+FastAPI
+
+
+SQLAlchemy ORM
+
+
+Alembic migrations
+
+
+PostgreSQL database
+
+
+Redis for live state caching
+
+
+FastAPI WebSocket support
+
+
+Pydantic schemas
+
+
+Project structure requirements
+Clean modular architecture
+
+
+Docker support
+
+
+.env configuration
+
+
+Replit compatible run commands
+
+
+Clear README with setup instructions
+
+
+UI style
+Neutral SaaS interface
+
+
+Use shadcn/ui everywhere
+
+
+No brand-specific styling
+
+
+Clean modern dashboard UI
+
+
+
+Authentication
+Admin users must authenticate.
+Support:
+Signup
+email and password
+
+
+Login
+email and password
+
+
+OAuth
+Google OAuth login
+
+
+Use JWT authentication.
+Add scaffolding for:
+password reset
+
+
+email verification
+
+
+Admin routes must be protected.
+
+Admin dashboard
+After login, the user lands on /admin.
+Show a table of routes created by the user.
+Use a shadcn/ui table component.
+Add:
+Server-side pagination
+ Search by route name
+ Filter by status
+ Sorting by newest or oldest
+Pagination requirements
+Default page size: 10
+ Allow page sizes: 10, 25, 50
+API example
+GET /routes?page=1&page_size=10&status=&search=&sort=
+Each row shows:
+Route name
+ Created date
+ Start location
+ End location
+ Route status
+ Payment status
+ Active share link state
+ Last activation date
+Actions
+Create route
+ View details
+ Edit route
+ Start route
+ Pause route
+ Resume route
+ Reset route
+ Delete route
+ Reactivate route (requires payment)
+ Copy active share URL
+ Open public page
+
+Route lifecycle
+Routes have these statuses
+Draft
+ Ready
+ In progress
+ Paused
+ Completed
+ Expired
+Business rules
+A route may exist as draft without payment.
+Payment is required before a public share link is generated.
+Once payment succeeds:
+a share token is created
+
+
+the route becomes ready to start.
+
+
+When a route finishes:
+its share token becomes invalid
+
+
+the public link stops working.
+
+
+If the admin wants to run the same route again:
+they must pay again
+
+
+a new share token is generated.
+
+
+Deleting a route invalidates any share links.
+
+Route creation
+The admin dashboard must include a Create Route button.
+Clicking it opens a route builder interface.
+This can be a page or large modal.
+Use Mapbox GL JS for the map.
+Route builder features
+Input route name
+Choose start location on map
+Choose end location on map
+Add stops along the route
+For each stop define
+stop duration
+
+
+Define truck speed
+Display the route polyline between start and end
+Show distance and estimated travel time
+Allow:
+Dragging markers
+ Editing stops
+ Deleting stops
+ Reordering stops
+The route can be saved as draft before payment.
+
+Editing routes while running
+The admin must be able to edit route parameters even while the simulation is running.
+Editable parameters include:
+Truck speed
+ Stop locations
+ Stop duration
+ Adding new stops
+ Removing stops
+Implement a route revision system.
+When edits occur during a running simulation:
+recalculate the remaining route state
+
+
+update Redis snapshot
+
+
+broadcast update to viewers
+
+
+
+Payments
+Use ArCa only for payments.
+Payments should be integrated through an ArCa member bank acquiring flow.
+Implement:
+ArcaPaymentGateway
+ MockPaymentGateway for development
+Support payment statuses
+Pending
+ Authorized
+ Paid
+ Failed
+ Expired
+ Refunded
+Payment rules
+Only admin pays
+ Public viewers never pay
+Payment is required to activate a route.
+Payment is required again if the route is restarted after completion.
+Store
+payment reference
+ transaction id
+ provider payload
+ amount
+ currency
+ paid_at timestamp
+Default currency
+AMD
+Currency must be configurable.
+
+Live simulation system
+This application simulates a truck traveling along the route.
+All viewers must see the same truck position.
+Important rule
+Do NOT store every coordinate every second in the database.
+Instead use a simulation model.
+Persistent data stored in PostgreSQL
+Route geometry
+ Stops
+ Route revisions
+ Simulation state
+ Payment records
+ Share links
+
+Redis live state
+Redis should store one object per active route.
+Do NOT store "current position" separately.
+Instead store a single object called latest_live_snapshot.
+Redis key format
+route_live_snapshot:{route_id}
+Example value
+{
+ routeId: "123",
+ timestamp: "...",
+ status: "IN_PROGRESS",
+ distanceTraveledM: 30210,
+ progressPercent: 41,
+ lat: 40.1832,
+ lng: 44.5151,
+ bearing: 90
+}
+This snapshot already contains the truck’s current position.
+The snapshot should be updated every few seconds.
+Redis acts only as a fast cache for the latest state, not as the system of record.
+If Redis is empty, the backend must recompute the position from the database state.
+
+Position calculation
+Truck position must be computed from
+Route polyline
+ Truck speed
+ Stops and stop durations
+ Start time
+ Pause time
+ Simulation status
+Formula concept
+distance_traveled = speed × effective_movement_time
+Then determine the corresponding point on the route polyline.
+
+WebSocket live updates
+Use WebSockets to broadcast updates to public viewers.
+Events include
+route_started
+ route_paused
+ route_resumed
+ route_updated
+ position_snapshot
+ route_completed
+Broadcast the latest snapshot every few seconds.
+Frontend should animate the truck marker smoothly between updates.
+
+Public route page
+Public routes are accessed at
+tracktruck.live/[id]
+This page is view-only.
+No login required.
+Page layout
+Full screen map
+ Live truck marker
+ Route polyline
+ Stop markers
+ Status badge
+ Progress indicator
+Header
+App name placeholder
+ Logo placeholder
+Footer
+Contact us link
+
+Public page behavior
+If the route is active
+Show the live map with moving truck.
+If the route is completed
+Display a professional completion message
+"This tracking session has ended.
+ The route is complete and no longer active."
+If the route token does not exist or expired
+Show
+"No active route found.
+ This tracking link is invalid, expired, or no longer available."
+
+Backend models
+Create database models for
+User
+ OAuthAccount
+ Route
+ RouteStop
+ RouteRevision
+ SimulationState
+ ShareLink
+ PaymentOrder
+ LiveSnapshot
+Each route may have multiple activations.
+Each activation has
+its own payment
+ its own share token
+Only one active share token may exist per active route run.
+
+API endpoints
+Auth
+POST /auth/signup
+ POST /auth/login
+ POST /auth/google
+ POST /auth/refresh
+ POST /auth/logout
+Routes
+GET /routes
+ POST /routes
+ GET /routes/{id}
+ PUT /routes/{id}
+ DELETE /routes/{id}
+Stops
+POST /routes/{id}/stops
+ PUT /routes/{id}/stops/{stop_id}
+ DELETE /routes/{id}/stops/{stop_id}
+Simulation
+POST /routes/{id}/activate
+ POST /routes/{id}/start
+ POST /routes/{id}/pause
+ POST /routes/{id}/resume
+ POST /routes/{id}/reset
+ POST /routes/{id}/recalculate
+Payments
+POST /payments/create
+ POST /payments/callback
+ GET /payments/{id}
+Public
+GET /public/track/{token}
+ GET /public/track/{token}/state
+WebSocket
+/public/ws/track/{token}
+
+Deliverables
+Generate
+React frontend
+ FastAPI backend
+ PostgreSQL schema
+ Alembic migrations
+ JWT auth
+ Google OAuth scaffold
+ shadcn/ui admin dashboard
+ Paginated routes table
+ Route builder UI
+ ArCa payment gateway skeleton
+ Mock payment gateway
+ Redis snapshot caching
+ WebSocket updates
+ Public live route page
+ README
+ .env.example
+ Sample seed data
+
+README
+Include instructions for
+Local development setup
+ Running backend and frontend
+ Using mock payments
+ Switching to ArCa payment mode
+ Environment variables
+ Domain routing for /admin and /[id]
