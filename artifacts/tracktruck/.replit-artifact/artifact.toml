@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "TrackTruck Live"
+version = "1.0.0"
+id = "artifacts/tracktruck"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 18184
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/tracktruck run dev"
+
+[services.env]
+PORT = "18184"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/tracktruck", "run", "build"]
+publicDir = "artifacts/tracktruck/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"

@@ -1,0 +1,22 @@
+packages:
+  "mapbox-gl": "Base mapbox rendering library"
+  "react-map-gl": "React wrapper for Mapbox GL JS"
+  "framer-motion": "Animations and layout transitions"
+  "date-fns": "Date formatting and manipulation"
+  "@dnd-kit/core": "Drag and drop core for reordering stops"
+  "@dnd-kit/sortable": "Sortable lists for dnd-kit"
+  "@dnd-kit/utilities": "Utilities for dnd-kit"
+  "zustand": "Lightweight state management"
+
+images:
+  - path: "artifacts/tracktruck/public/images/auth-bg.png"
+    description: "Abstract soft gradient mesh in slate and indigo, clean minimal SaaS aesthetic, highly professional"
+    aspect_ratio: "16:9"
+  - path: "artifacts/tracktruck/public/images/logo.png"
+    description: "Modern minimalist logo mark for a logistics and trucking SaaS, clean geometric shapes, deep blue and slate"
+    aspect_ratio: "1:1"
+
+notes:
+  - Intercepting window.fetch to inject JWT Bearer tokens for all /api requests
+  - Mapbox token is stored in localStorage since env vars are not exposed to the client
+  - Using @workspace/api-client-react for generated TanStack Query hooks

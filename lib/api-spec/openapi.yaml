@@ -3,20 +3,32 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: TrackTruck Live API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: routes
+    description: Route management
+  - name: stops
+    description: Route stop management
+  - name: simulation
+    description: Simulation control
+  - name: payments
+    description: Payment operations
+  - name: public
+    description: Public tracking
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,7 +36,612 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/signup:
+    post:
+      operationId: authSignup
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: authLogin
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/google:
+    post:
+      operationId: authGoogle
+      tags: [auth]
+      summary: Login or register with Google
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleAuthRequest"
+      responses:
+        "200":
+          description: Auth successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+
+  /auth/refresh:
+    post:
+      operationId: authRefresh
+      tags: [auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: authLogout
+      tags: [auth]
+      summary: Logout
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/me:
+    get:
+      operationId: authMe
+      tags: [auth]
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /routes:
+    get:
+      operationId: listRoutes
+      tags: [routes]
+      summary: List routes with pagination
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 10
+            enum: [10, 25, 50]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, ready, in_progress, paused, completed, expired]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, oldest]
+            default: newest
+      responses:
+        "200":
+          description: Paginated routes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRoutes"
+
+    post:
+      operationId: createRoute
+      tags: [routes]
+      summary: Create a new route
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRouteRequest"
+      responses:
+        "201":
+          description: Route created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteDetail"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /routes/{id}:
+    get:
+      operationId: getRoute
+      tags: [routes]
+      summary: Get route details
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      operationId: updateRoute
+      tags: [routes]
+      summary: Update a route
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRouteRequest"
+      responses:
+        "200":
+          description: Route updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteDetail"
+
+    delete:
+      operationId: deleteRoute
+      tags: [routes]
+      summary: Delete a route
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /routes/{id}/stops:
+    post:
+      operationId: createStop
+      tags: [stops]
+      summary: Add a stop to a route
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStopRequest"
+      responses:
+        "201":
+          description: Stop created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteStop"
+
+  /routes/{id}/stops/{stopId}:
+    put:
+      operationId: updateStop
+      tags: [stops]
+      summary: Update a stop
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: stopId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStopRequest"
+      responses:
+        "200":
+          description: Stop updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteStop"
+
+    delete:
+      operationId: deleteStop
+      tags: [stops]
+      summary: Delete a stop
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: stopId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Stop deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /routes/{id}/activate:
+    post:
+      operationId: activateRoute
+      tags: [simulation]
+      summary: Activate a route (requires payment)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivateRouteResponse"
+
+  /routes/{id}/start:
+    post:
+      operationId: startRoute
+      tags: [simulation]
+      summary: Start route simulation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulationStateResponse"
+
+  /routes/{id}/pause:
+    post:
+      operationId: pauseRoute
+      tags: [simulation]
+      summary: Pause route simulation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulationStateResponse"
+
+  /routes/{id}/resume:
+    post:
+      operationId: resumeRoute
+      tags: [simulation]
+      summary: Resume route simulation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulationStateResponse"
+
+  /routes/{id}/reset:
+    post:
+      operationId: resetRoute
+      tags: [simulation]
+      summary: Reset route simulation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulationStateResponse"
+
+  /routes/{id}/recalculate:
+    post:
+      operationId: recalculateRoute
+      tags: [simulation]
+      summary: Recalculate route after revision
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Route recalculated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulationStateResponse"
+
+  /payments/create:
+    post:
+      operationId: createPayment
+      tags: [payments]
+      summary: Create a payment order
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+      responses:
+        "201":
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentOrderResponse"
+
+  /payments/callback:
+    post:
+      operationId: paymentCallback
+      tags: [payments]
+      summary: Payment provider callback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCallbackRequest"
+      responses:
+        "200":
+          description: Callback processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /payments/{id}:
+    get:
+      operationId: getPayment
+      tags: [payments]
+      summary: Get payment status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Payment details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentOrderResponse"
+
+  /public/track/{token}:
+    get:
+      operationId: getPublicTrack
+      tags: [public]
+      summary: Get public route data by share token
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Route tracking data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicTrackResponse"
+        "404":
+          description: Token not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /public/track/{token}/state:
+    get:
+      operationId: getPublicTrackState
+      tags: [public]
+      summary: Get current simulation state
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current live snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSnapshotResponse"
+        "404":
+          description: Token not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +651,589 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    SignupRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        name:
+          type: string
+      required:
+        - email
+        - password
+        - name
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    GoogleAuthRequest:
+      type: object
+      properties:
+        idToken:
+          type: string
+      required:
+        - idToken
+
+    RefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required:
+        - refreshToken
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserProfile"
+      required:
+        - accessToken
+        - refreshToken
+        - user
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: string
+        emailVerified:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - email
+        - name
+        - emailVerified
+        - createdAt
+
+    CreateRouteRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        startLat:
+          type: number
+        startLng:
+          type: number
+        endLat:
+          type: number
+        endLng:
+          type: number
+        truckSpeedKmh:
+          type: number
+          default: 60
+        polyline:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+            minItems: 2
+            maxItems: 2
+      required:
+        - name
+        - startLat
+        - startLng
+        - endLat
+        - endLng
+
+    UpdateRouteRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        startLat:
+          type: number
+        startLng:
+          type: number
+        endLat:
+          type: number
+        endLng:
+          type: number
+        truckSpeedKmh:
+          type: number
+        polyline:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+            minItems: 2
+            maxItems: 2
+
+    RouteListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [draft, ready, in_progress, paused, completed, expired]
+        startLat:
+          type: number
+        startLng:
+          type: number
+        endLat:
+          type: number
+        endLng:
+          type: number
+        truckSpeedKmh:
+          type: number
+        paymentStatus:
+          type: string
+          nullable: true
+        shareToken:
+          type: string
+          nullable: true
+        shareLinkActive:
+          type: boolean
+        lastActivationDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - status
+        - startLat
+        - startLng
+        - endLat
+        - endLng
+        - truckSpeedKmh
+        - shareLinkActive
+        - createdAt
+        - updatedAt
+
+    RouteDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [draft, ready, in_progress, paused, completed, expired]
+        startLat:
+          type: number
+        startLng:
+          type: number
+        endLat:
+          type: number
+        endLng:
+          type: number
+        truckSpeedKmh:
+          type: number
+        polyline:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+            minItems: 2
+            maxItems: 2
+        distanceM:
+          type: number
+        estimatedDurationS:
+          type: number
+        paymentStatus:
+          type: string
+          nullable: true
+        shareToken:
+          type: string
+          nullable: true
+        shareLinkActive:
+          type: boolean
+        lastActivationDate:
+          type: string
+          format: date-time
+          nullable: true
+        stops:
+          type: array
+          items:
+            $ref: "#/components/schemas/RouteStop"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - status
+        - startLat
+        - startLng
+        - endLat
+        - endLng
+        - truckSpeedKmh
+        - polyline
+        - distanceM
+        - estimatedDurationS
+        - shareLinkActive
+        - stops
+        - createdAt
+        - updatedAt
+
+    PaginatedRoutes:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/RouteListItem"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+      required:
+        - data
+        - total
+        - page
+        - pageSize
+
+    RouteStop:
+      type: object
+      properties:
+        id:
+          type: integer
+        routeId:
+          type: integer
+        name:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        durationMinutes:
+          type: number
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - routeId
+        - name
+        - lat
+        - lng
+        - durationMinutes
+        - sortOrder
+        - createdAt
+
+    CreateStopRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        durationMinutes:
+          type: number
+          default: 5
+        sortOrder:
+          type: integer
+      required:
+        - name
+        - lat
+        - lng
+
+    UpdateStopRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        durationMinutes:
+          type: number
+        sortOrder:
+          type: integer
+
+    ActivateRouteResponse:
+      type: object
+      properties:
+        routeId:
+          type: integer
+        status:
+          type: string
+        shareToken:
+          type: string
+        paymentId:
+          type: integer
+        paymentStatus:
+          type: string
+      required:
+        - routeId
+        - status
+        - shareToken
+        - paymentId
+        - paymentStatus
+
+    SimulationStateResponse:
+      type: object
+      properties:
+        routeId:
+          type: integer
+        status:
+          type: string
+          enum: [draft, ready, in_progress, paused, completed, expired]
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        pausedAt:
+          type: string
+          format: date-time
+          nullable: true
+        effectiveElapsedMs:
+          type: number
+        distanceTraveledM:
+          type: number
+        progressPercent:
+          type: number
+        lat:
+          type: number
+          nullable: true
+        lng:
+          type: number
+          nullable: true
+        bearing:
+          type: number
+          nullable: true
+      required:
+        - routeId
+        - status
+        - effectiveElapsedMs
+        - distanceTraveledM
+        - progressPercent
+
+    CreatePaymentRequest:
+      type: object
+      properties:
+        routeId:
+          type: integer
+        amount:
+          type: number
+        currency:
+          type: string
+          default: AMD
+      required:
+        - routeId
+        - amount
+
+    PaymentCallbackRequest:
+      type: object
+      properties:
+        paymentReference:
+          type: string
+        transactionId:
+          type: string
+        status:
+          type: string
+          enum: [authorized, paid, failed, expired]
+        providerPayload:
+          type: object
+      required:
+        - paymentReference
+        - transactionId
+        - status
+
+    PaymentOrderResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        routeId:
+          type: integer
+        userId:
+          type: integer
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, authorized, paid, failed, expired, refunded]
+        paymentReference:
+          type: string
+        transactionId:
+          type: string
+          nullable: true
+        approvalUrl:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - routeId
+        - userId
+        - amount
+        - currency
+        - status
+        - paymentReference
+        - createdAt
+
+    PublicTrackResponse:
+      type: object
+      properties:
+        routeId:
+          type: integer
+        routeName:
+          type: string
+        status:
+          type: string
+          enum: [ready, in_progress, paused, completed, expired]
+        startLat:
+          type: number
+        startLng:
+          type: number
+        endLat:
+          type: number
+        endLng:
+          type: number
+        polyline:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+            minItems: 2
+            maxItems: 2
+        stops:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicStopInfo"
+        distanceM:
+          type: number
+        estimatedDurationS:
+          type: number
+        snapshot:
+          $ref: "#/components/schemas/LiveSnapshotResponse"
+      required:
+        - routeId
+        - routeName
+        - status
+        - startLat
+        - startLng
+        - endLat
+        - endLng
+        - polyline
+        - stops
+        - distanceM
+        - estimatedDurationS
+
+    PublicStopInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        durationMinutes:
+          type: number
+        sortOrder:
+          type: integer
+      required:
+        - name
+        - lat
+        - lng
+        - durationMinutes
+        - sortOrder
+
+    LiveSnapshotResponse:
+      type: object
+      properties:
+        routeId:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [ready, in_progress, paused, completed]
+        distanceTraveledM:
+          type: number
+        progressPercent:
+          type: number
+        lat:
+          type: number
+          nullable: true
+        lng:
+          type: number
+          nullable: true
+        bearing:
+          type: number
+          nullable: true
+      required:
+        - routeId
+        - timestamp
+        - status
+        - distanceTraveledM
+        - progressPercent
