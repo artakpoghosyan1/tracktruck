@@ -6,7 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, CreditCard, Flag, GripVertical,
   Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
-  MapPin, X,
+  MapPin, X, CheckCircle2, Loader2,
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -16,7 +16,7 @@ import { MapboxPrompt } from "@/components/MapboxPrompt";
 import { AddressSearch } from "@/components/AddressSearch";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
-import { fetchDirections, fetchOsrmDirections, type SpeedSegment } from "@/lib/mapbox-utils";
+import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
 import { useCreateRoute, useUpdateRoute, useGetRoute, useCreatePayment, getGetRouteQueryKey } from "@workspace/api-client-react";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
@@ -56,6 +56,16 @@ async function reverseGeocode(lat: number, lng: number, mapboxToken?: string | n
   } catch {
     return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   }
+}
+
+function routeLabel(idx: number, option: RouteOption, allOptions: RouteOption[]): string {
+  if (allOptions.length === 1) return "Recommended";
+  const shortest = [...allOptions].sort((a, b) => a.distanceM - b.distanceM)[0];
+  const fastest = [...allOptions].sort((a, b) => a.durationS - b.durationS)[0];
+  if (option === shortest && option === fastest) return "Shortest & Fastest";
+  if (option === shortest) return "Shortest";
+  if (option === fastest) return "Fastest";
+  return `Alternative ${idx}`;
 }
 
 function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration }: {
@@ -117,13 +127,21 @@ export default function RouteBuilder() {
   const [start, setStart] = useState<RoutePoint | null>(null);
   const [end, setEnd] = useState<RoutePoint | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
-  const [polyline, setPolyline] = useState<number[][]>([]);
-  const [speedProfile, setSpeedProfile] = useState<SpeedSegment[]>([]);
-  const [distance, setDistance] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [showAddStop, setShowAddStop] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
+
+  // Route alternatives
+  const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+
+  // The currently chosen route data
+  const selectedRoute = routeOptions[selectedIdx] ?? null;
+  const polyline = selectedRoute?.polyline ?? [];
+  const distance = selectedRoute?.distanceM ?? 0;
+  const duration = selectedRoute?.durationS ?? 0;
+  const speedProfile: SpeedSegment[] = selectedRoute?.speedProfile ?? [];
 
   const { data: existingRoute } = useGetRoute(routeId || 0, {
     query: { queryKey: getGetRouteQueryKey(routeId || 0), enabled: !!routeId },
@@ -138,50 +156,69 @@ export default function RouteBuilder() {
     setSpeed(existingRoute.truckSpeedKmh);
     setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
     setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
-    setPolyline(existingRoute.polyline || []);
-    setSpeedProfile(existingRoute.speedProfile ?? []);
-    setDistance(existingRoute.distanceM || 0);
-    setDuration(existingRoute.estimatedDurationS || 0);
     setStops(existingRoute.stops.map(s => ({
       id: `db-${s.id}`, name: s.name, lat: s.lat, lng: s.lng,
       durationMinutes: s.durationMinutes, dbId: s.id,
     })));
+    // Restore the saved route as a single option
+    if (existingRoute.polyline?.length) {
+      setRouteOptions([{
+        polyline: existingRoute.polyline,
+        distanceM: existingRoute.distanceM || 0,
+        durationS: existingRoute.estimatedDurationS || 0,
+        speedProfile: existingRoute.speedProfile ?? [],
+      }]);
+      setSelectedIdx(0);
+    }
   }, [existingRoute]);
 
+  // Fetch route alternatives whenever start/end/stops change
   useEffect(() => {
-    if (!start || !end) return;
+    if (!start || !end) {
+      setRouteOptions([]);
+      return;
+    }
     const t = setTimeout(async () => {
+      setIsRouting(true);
       const coords = [[start.lng, start.lat], ...stops.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
 
-      const fitMap = () => {
-        if (mapRef.current) {
-          const bounds = new mapboxgl.LngLatBounds([start.lng, start.lat], [start.lng, start.lat]);
-          coords.forEach(c => bounds.extend(c as [number, number]));
-          mapRef.current.fitBounds(bounds, { padding: 80, duration: 800 });
+      try {
+        let options: RouteOption[] = [];
+
+        if (mapboxToken) {
+          // Mapbox returns up to 3 alternatives; enrich with OSRM speed profiles
+          const [mbOptions, osrmOptions] = await Promise.all([
+            fetchDirections(coords, mapboxToken),
+            fetchOsrmDirections(coords),
+          ]);
+          if (mbOptions && mbOptions.length > 0) {
+            // Assign OSRM speed profiles by index (best-effort match)
+            options = mbOptions.map((opt, i) => ({
+              ...opt,
+              speedProfile: osrmOptions?.[i]?.speedProfile ?? osrmOptions?.[0]?.speedProfile ?? [],
+            }));
+          } else if (osrmOptions) {
+            options = osrmOptions;
+          }
+        } else {
+          // No Mapbox token: use OSRM only
+          const osrmOptions = await fetchOsrmDirections(coords);
+          if (osrmOptions) options = osrmOptions;
         }
-      };
 
-      const osrmRes = await fetchOsrmDirections(coords);
-      const osrmProfile = osrmRes?.speedProfile ?? [];
+        if (options.length > 0) {
+          setRouteOptions(options);
+          setSelectedIdx(0);
 
-      if (mapboxToken) {
-        const mbRes = await fetchDirections(coords, mapboxToken);
-        if (mbRes) {
-          setPolyline(mbRes.polyline);
-          setSpeedProfile(osrmProfile);
-          setDistance(mbRes.distanceM);
-          setDuration(mbRes.durationS);
-          fitMap();
-          return;
+          // Fit map to the first (shortest) route
+          if (mapRef.current && mapboxToken) {
+            const bounds = new mapboxgl.LngLatBounds([start.lng, start.lat], [start.lng, start.lat]);
+            options[0].polyline.forEach(c => bounds.extend(c as [number, number]));
+            mapRef.current.fitBounds(bounds, { padding: 80, duration: 800 });
+          }
         }
-      }
-
-      if (osrmRes) {
-        setPolyline(osrmRes.polyline);
-        setSpeedProfile(osrmProfile);
-        setDistance(osrmRes.distanceM);
-        setDuration(osrmRes.durationS);
-        fitMap();
+      } finally {
+        setIsRouting(false);
       }
     }, 400);
     return () => clearTimeout(t);
@@ -299,10 +336,11 @@ export default function RouteBuilder() {
     },
   };
 
-  const geojsonLine: GeoJSON.Feature<GeoJSON.LineString> = {
-    type: 'Feature', properties: {},
-    geometry: { type: 'LineString', coordinates: polyline },
-  };
+  // Build GeoJSON sources for all route options
+  const routeGeoJsons = routeOptions.map(opt => ({
+    type: 'Feature' as const, properties: {},
+    geometry: { type: 'LineString' as const, coordinates: opt.polyline },
+  }));
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -316,7 +354,7 @@ export default function RouteBuilder() {
           </Link>
           <div>
             <h1 className="text-base font-bold font-display leading-tight">{routeId ? "Edit Route" : "Create New Route"}</h1>
-            <p className="text-xs text-muted-foreground">Search locations or click the map to place start, end &amp; stops</p>
+            <p className="text-xs text-muted-foreground">Search locations or click the map · compare route options · save your choice</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -428,6 +466,61 @@ export default function RouteBuilder() {
 
             <hr className="border-border/50" />
 
+            {/* Route Alternatives */}
+            {(isRouting || routeOptions.length > 0) && (
+              <>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Route Options</h3>
+                    {isRouting && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+
+                  {isRouting && routeOptions.length === 0 ? (
+                    <div className="flex items-center gap-2 py-3 px-3 rounded-xl bg-muted/40">
+                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground shrink-0" />
+                      <p className="text-xs text-muted-foreground">Calculating routes…</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {routeOptions.map((opt, i) => {
+                        const label = routeLabel(i, opt, routeOptions);
+                        const isSelected = i === selectedIdx;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => setSelectedIdx(i)}
+                            className={`w-full text-left rounded-xl border p-3 transition-all ${
+                              isSelected
+                                ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
+                                : 'border-border/60 bg-muted/20 hover:bg-muted/40 hover:border-border'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-3 h-3 rounded-full shrink-0 ${isSelected ? 'bg-primary' : 'bg-slate-300'}`} />
+                                <span className={`text-xs font-bold ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}>
+                                  {label}
+                                </span>
+                              </div>
+                              {isSelected && (
+                                <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 pl-5">
+                              <span className="text-sm font-bold text-foreground">{fmt.dist(opt.distanceM)}</span>
+                              <span className="text-xs text-muted-foreground">·</span>
+                              <span className="text-xs text-muted-foreground">{fmt.dur(opt.durationS)}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <hr className="border-border/50" />
+              </>
+            )}
+
             {/* Stops */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -483,7 +576,7 @@ export default function RouteBuilder() {
             {/* Summary */}
             {distance > 0 && (
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-3">Route Summary</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-3">Selected Route</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <p className="text-xs text-emerald-600/70 mb-0.5">Distance</p>
@@ -494,7 +587,7 @@ export default function RouteBuilder() {
                     <p className="text-lg font-bold text-emerald-800">{fmt.dur(duration)}</p>
                   </div>
                 </div>
-                <p className="text-xs text-emerald-600/70 mt-2">Route via real road geometry (OSRM)</p>
+                <p className="text-xs text-emerald-600/70 mt-2">Real road geometry · {routeOptions.length} option{routeOptions.length !== 1 ? 's' : ''} found</p>
               </div>
             )}
 
@@ -516,6 +609,31 @@ export default function RouteBuilder() {
               cursor="crosshair"
               onClick={handleMapClick}
             >
+              {/* Unselected route alternatives (grey, behind) */}
+              {routeGeoJsons.map((geo, i) => {
+                if (i === selectedIdx) return null;
+                return (
+                  <Source key={`alt-${i}`} id={`alt-route-${i}`} type="geojson" data={geo}>
+                    <Layer
+                      id={`alt-line-${i}`}
+                      type="line"
+                      paint={{ 'line-color': '#cbd5e1', 'line-width': 4, 'line-opacity': 0.7 }}
+                    />
+                  </Source>
+                );
+              })}
+
+              {/* Selected route (colored, on top) */}
+              {polyline.length >= 2 && (
+                <Source id="selected-route" type="geojson" data={routeGeoJsons[selectedIdx]}>
+                  <Layer
+                    id="selected-line"
+                    type="line"
+                    paint={{ 'line-color': 'hsl(239 84% 67%)', 'line-width': 5, 'line-opacity': 0.9 }}
+                  />
+                </Source>
+              )}
+
               {/* Start marker */}
               {start && (
                 <Marker longitude={start.lng} latitude={start.lat} anchor="center">
@@ -541,17 +659,6 @@ export default function RouteBuilder() {
                 </Marker>
               ))}
 
-              {/* Route polyline */}
-              {polyline.length >= 2 && (
-                <Source type="geojson" data={geojsonLine}>
-                  <Layer
-                    id="route-line"
-                    type="line"
-                    paint={{ 'line-color': 'hsl(239 84% 67%)', 'line-width': 5, 'line-opacity': 0.85 }}
-                  />
-                </Source>
-              )}
-
               {/* Map-click popup */}
               {mapClick && (
                 <Popup
@@ -564,7 +671,6 @@ export default function RouteBuilder() {
                   maxWidth="260px"
                 >
                   <div className="bg-white rounded-xl shadow-xl border border-border overflow-hidden" style={{ minWidth: 220 }}>
-                    {/* Header */}
                     <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2 border-b border-border/50">
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-foreground mb-0.5">Place on map</p>
@@ -581,8 +687,6 @@ export default function RouteBuilder() {
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
-
-                    {/* Actions */}
                     <div className="p-2 space-y-1">
                       <button
                         onClick={() => applyMapClick('start')}
@@ -613,7 +717,17 @@ export default function RouteBuilder() {
                 </Popup>
               )}
 
-              {/* Map hint overlay */}
+              {/* Loading overlay */}
+              {isRouting && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none z-10">
+                  <div className="bg-black/70 text-white text-xs font-medium px-4 py-2 rounded-full flex items-center gap-2 shadow-lg backdrop-blur-sm">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Finding best routes…
+                  </div>
+                </div>
+              )}
+
+              {/* Map hint */}
               {!start && !end && (
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
                   <div className="bg-black/70 text-white text-xs font-medium px-4 py-2 rounded-full flex items-center gap-2 shadow-lg backdrop-blur-sm">
@@ -631,8 +745,8 @@ export default function RouteBuilder() {
               <div className="text-center max-w-sm">
                 <p className="font-bold text-foreground text-lg mb-2">Map preview disabled</p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Configure a Mapbox token to see your route on a map, click to place points, and get real road directions.
-                  Address search works with OpenStreetMap either way.
+                  Configure a Mapbox token to see route options on a map, click to place points, and get turn-by-turn directions.
+                  Address search and route calculation work without a token.
                 </p>
                 <button
                   onClick={openMapboxPrompt}

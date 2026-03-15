@@ -21,18 +21,35 @@ export interface SpeedSegment {
   speedKmh: number;
 }
 
-export async function fetchOsrmDirections(
-  coordinates: number[][] // array of [lng, lat]
-): Promise<{
+export interface RouteOption {
   polyline: number[][];
   distanceM: number;
   durationS: number;
   speedProfile: SpeedSegment[];
-} | null> {
+}
+
+function extractSpeedProfile(legs: any[]): SpeedSegment[] {
+  const profile: SpeedSegment[] = [];
+  for (const leg of legs) {
+    for (const step of leg.steps ?? []) {
+      if (step.distance > 0 && step.duration > 0) {
+        const speedKmh = (step.distance / step.duration) * 3.6;
+        if (isFinite(speedKmh) && speedKmh > 0) {
+          profile.push({ distanceM: step.distance, speedKmh });
+        }
+      }
+    }
+  }
+  return profile;
+}
+
+export async function fetchOsrmDirections(
+  coordinates: number[][]
+): Promise<RouteOption[] | null> {
   if (coordinates.length < 2) return null;
 
   const coordsString = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
-  const url = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson&steps=true&annotations=speed`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson&steps=true&alternatives=3`;
 
   try {
     const res = await fetch(url);
@@ -41,28 +58,12 @@ export async function fetchOsrmDirections(
 
     if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) return null;
 
-    const route = data.routes[0];
-    const polyline = route.geometry.coordinates as number[][];
-    const distanceM = route.distance as number;
-    const durationS = route.duration as number;
-
-    const speedProfile: SpeedSegment[] = [];
-    for (const leg of route.legs) {
-      for (const step of leg.steps) {
-        if (step.distance > 0 && step.duration > 0) {
-          const speedMs = step.distance / step.duration;
-          const speedKmh = speedMs * 3.6;
-          if (isFinite(speedKmh) && speedKmh > 0) {
-            speedProfile.push({
-              distanceM: step.distance,
-              speedKmh,
-            });
-          }
-        }
-      }
-    }
-
-    return { polyline, distanceM, durationS, speedProfile };
+    return data.routes.map((route: any): RouteOption => ({
+      polyline: route.geometry.coordinates as number[][],
+      distanceM: route.distance as number,
+      durationS: route.duration as number,
+      speedProfile: extractSpeedProfile(route.legs ?? []),
+    }));
   } catch (error) {
     console.error('OSRM directions error:', error);
     return null;
@@ -70,28 +71,27 @@ export async function fetchOsrmDirections(
 }
 
 export async function fetchDirections(
-  coordinates: number[][], // array of [lng, lat]
+  coordinates: number[][],
   token: string
-) {
+): Promise<RouteOption[] | null> {
   if (coordinates.length < 2) return null;
 
   const coordsString = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsString}?geometries=geojson&access_token=${token}`;
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsString}?geometries=geojson&alternatives=true&access_token=${token}`;
 
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch directions');
     const data = await res.json();
-    
-    if (data.routes && data.routes.length > 0) {
-      const route = data.routes[0];
-      return {
-        polyline: route.geometry.coordinates as number[][],
-        distanceM: route.distance as number,
-        durationS: route.duration as number,
-      };
-    }
-    return null;
+
+    if (!data.routes || data.routes.length === 0) return null;
+
+    return data.routes.map((route: any): RouteOption => ({
+      polyline: route.geometry.coordinates as number[][],
+      distanceM: route.distance as number,
+      durationS: route.duration as number,
+      speedProfile: [],
+    }));
   } catch (error) {
     console.error('Directions error:', error);
     return null;
