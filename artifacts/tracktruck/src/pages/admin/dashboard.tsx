@@ -165,15 +165,13 @@ export default function Dashboard() {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {route.status === 'draft' && (
-                          <Link
-                            href={`/admin/routes/${route.id}/edit`}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                            title="Edit route"
-                          >
-                            <Edit className="w-3.5 h-3.5" /> Edit
-                          </Link>
-                        )}
+                        <Link
+                          href={`/admin/routes/${route.id}/edit`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                          title="Edit route"
+                        >
+                          <Edit className="w-3.5 h-3.5" /> Edit
+                        </Link>
                         {route.status === 'ready' && (
                           <button
                             onClick={() => handleAction('start', route.id)}
