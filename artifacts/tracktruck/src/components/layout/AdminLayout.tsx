@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Map, LayoutDashboard, Truck, LogOut, Loader2 } from "lucide-react";
 import { useAuthMe, getAuthMeQueryKey } from "@workspace/api-client-react";
@@ -20,6 +20,14 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
     },
   });
 
+  useEffect(() => {
+    if (!isLoading && (isError || !user)) {
+      localStorage.removeItem('tracktruck_token');
+      setAuthenticated(false);
+      setLocation("/login");
+    }
+  }, [isLoading, isError, user, setAuthenticated, setLocation]);
+
   if (isLoading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-background">
@@ -30,9 +38,6 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
   }
 
   if (isError || !user) {
-    localStorage.removeItem('tracktruck_token');
-    setAuthenticated(false);
-    setLocation("/login");
     return null;
   }
 

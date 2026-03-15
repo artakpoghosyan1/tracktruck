@@ -110,8 +110,9 @@ export const listRoutesQuerySortDefault = `newest`;
 
 export const ListRoutesQueryParams = zod.object({
   page: zod.coerce.number().default(listRoutesQueryPageDefault),
-  page_size: zod
-    .union([zod.literal(10), zod.literal(25), zod.literal(50)])
+  page_size: zod.coerce
+    .number()
+    .refine((v) => [10, 25, 50].includes(v), { message: "Must be 10, 25, or 50" })
     .default(listRoutesQueryPageSizeDefault),
   status: zod
     .enum(["draft", "ready", "in_progress", "paused", "completed", "expired"])

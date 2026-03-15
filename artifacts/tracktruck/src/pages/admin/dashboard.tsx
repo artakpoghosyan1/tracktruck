@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { 
-  Plus, Search, MoreVertical, Play, Pause, SquareSquare, 
+  Plus, Search, Play, Pause,
   RotateCcw, Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
@@ -112,93 +112,111 @@ export default function Dashboard() {
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-muted/30 text-muted-foreground font-semibold border-b border-border/50">
+            <thead className="bg-muted/30 text-muted-foreground font-semibold border-b border-border/50 text-xs uppercase tracking-wider">
               <tr>
-                <th className="p-4">Route Name</th>
-                <th className="p-4">Status</th>
-                <th className="p-4">Created</th>
-                <th className="p-4">Payment</th>
-                <th className="p-4">Share Link</th>
+                <th className="p-4 text-left">Route Name</th>
+                <th className="p-4 text-left">Status</th>
+                <th className="p-4 text-left">Created</th>
+                <th className="p-4 text-left">Share Link</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={5} className="p-8 text-center text-muted-foreground">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary" />
                     Loading routes...
                   </td>
                 </tr>
               ) : data?.data.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={5} className="p-8 text-center text-muted-foreground">
                     No routes found. Create your first one above!
                   </td>
                 </tr>
               ) : (
                 data?.data.map((route) => (
-                  <tr key={route.id} className="hover:bg-muted/10 transition-colors group">
+                  <tr key={route.id} className="hover:bg-muted/10 transition-colors">
                     <td className="p-4 font-medium text-foreground">{route.name}</td>
                     <td className="p-4">
                       <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${getStatusColor(route.status)} uppercase tracking-wider`}>
                         {route.status.replace('_', ' ')}
                       </span>
                     </td>
-                    <td className="p-4 text-muted-foreground">
+                    <td className="p-4 text-muted-foreground text-sm">
                       {format(new Date(route.createdAt), "MMM d, yyyy")}
                     </td>
                     <td className="p-4">
-                      {route.paymentStatus ? (
-                        <span className="text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded text-xs">{route.paymentStatus}</span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">Unpaid</span>
-                      )}
-                    </td>
-                    <td className="p-4">
                       {route.shareToken && route.shareLinkActive ? (
-                        <button onClick={() => copyLink(route.shareToken!)} className="flex items-center gap-1.5 text-primary hover:underline text-xs font-medium bg-primary/5 px-2 py-1 rounded-md">
-                          <LinkIcon className="w-3 h-3" /> Copy Link
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => copyLink(route.shareToken!)} className="flex items-center gap-1.5 text-primary hover:text-primary/80 text-xs font-semibold bg-primary/8 hover:bg-primary/15 px-2.5 py-1.5 rounded-lg transition-colors" title="Copy share link">
+                            <LinkIcon className="w-3 h-3" /> Copy Link
+                          </button>
+                          <a href={`/${route.shareToken}`} target="_blank" rel="noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Open live tracking page">
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
                       ) : (
-                        <span className="text-muted-foreground text-xs">Inactive</span>
+                        <span className="text-muted-foreground text-xs">
+                          {route.status === 'draft' ? 'Activate to get link' : 'No link'}
+                        </span>
                       )}
                     </td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1">
                         {route.status === 'draft' && (
-                          <Link href={`/admin/routes/${route.id}/edit`} className="p-1.5 text-slate-500 hover:text-primary hover:bg-primary/10 rounded-md transition-colors" title="Edit">
-                            <Edit className="w-4 h-4" />
+                          <Link
+                            href={`/admin/routes/${route.id}/edit`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                            title="Edit route"
+                          >
+                            <Edit className="w-3.5 h-3.5" /> Edit
                           </Link>
                         )}
                         {route.status === 'ready' && (
-                          <button onClick={() => handleAction('start', route.id)} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors" title="Start Route">
-                            <Play className="w-4 h-4" />
+                          <button
+                            onClick={() => handleAction('start', route.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-lg transition-colors shadow-sm"
+                            title="Start simulation"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" /> Start
                           </button>
                         )}
                         {route.status === 'in_progress' && (
-                          <button onClick={() => handleAction('pause', route.id)} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md transition-colors" title="Pause Route">
-                            <Pause className="w-4 h-4" />
+                          <button
+                            onClick={() => handleAction('pause', route.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors shadow-sm"
+                            title="Pause"
+                          >
+                            <Pause className="w-3.5 h-3.5 fill-current" /> Pause
                           </button>
                         )}
                         {route.status === 'paused' && (
-                          <button onClick={() => handleAction('resume', route.id)} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors" title="Resume Route">
-                            <Play className="w-4 h-4" />
+                          <button
+                            onClick={() => handleAction('resume', route.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-lg transition-colors shadow-sm"
+                            title="Resume"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" /> Resume
                           </button>
                         )}
                         {(route.status === 'in_progress' || route.status === 'paused' || route.status === 'completed') && (
-                          <button onClick={() => handleAction('reset', route.id)} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-md transition-colors" title="Reset Route">
+                          <button
+                            onClick={() => handleAction('reset', route.id)}
+                            className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Reset to start"
+                          >
                             <RotateCcw className="w-4 h-4" />
                           </button>
                         )}
-                        <button onClick={() => handleAction('delete', route.id)} className="p-1.5 text-destructive hover:bg-destructive/10 rounded-md transition-colors" title="Delete">
+                        <button
+                          onClick={() => handleAction('delete', route.id)}
+                          className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                          title="Delete route"
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
-                        {route.shareToken && route.shareLinkActive && (
-                          <a href={`/${route.shareToken}`} target="_blank" rel="noreferrer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Open Public Page">
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
-                        )}
                       </div>
                     </td>
                   </tr>
