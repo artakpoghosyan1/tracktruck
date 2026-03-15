@@ -216,6 +216,13 @@ export default function RouteBuilder() {
             options[0].polyline.forEach(c => bounds.extend(c as [number, number]));
             mapRef.current.fitBounds(bounds, { padding: 80, duration: 800 });
           }
+        } else {
+          setRouteOptions([]);
+          toast({
+            title: "No road route found",
+            description: "These two locations cannot be connected by road. Check that both points are on the same landmass and reachable by vehicle.",
+            variant: "destructive",
+          });
         }
       } finally {
         setIsRouting(false);

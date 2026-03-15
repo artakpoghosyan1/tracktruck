@@ -28,6 +28,10 @@ export interface RouteOption {
   speedProfile: SpeedSegment[];
 }
 
+/** Max allowed snapping distance: if OSRM moved our start/end more than this,
+ *  the route is invalid (different continent / no road connection). */
+const MAX_SNAP_M = 50_000; // 50 km
+
 function extractSpeedProfile(legs: any[]): SpeedSegment[] {
   const profile: SpeedSegment[] = [];
   for (const leg of legs) {
@@ -41,6 +45,24 @@ function extractSpeedProfile(legs: any[]): SpeedSegment[] {
     }
   }
   return profile;
+}
+
+/** Returns true if the route's actual start/end are too far from the requested coords */
+function routeIsSnappedFar(
+  requestedCoords: number[][], // [lng, lat][]
+  routePolyline: number[][]    // [lng, lat][]
+): boolean {
+  if (routePolyline.length === 0) return true;
+
+  const reqStart = requestedCoords[0];
+  const reqEnd = requestedCoords[requestedCoords.length - 1];
+  const routeStart = routePolyline[0];
+  const routeEnd = routePolyline[routePolyline.length - 1];
+
+  const snapStart = haversineDistanceM(reqStart[1], reqStart[0], routeStart[1], routeStart[0]);
+  const snapEnd = haversineDistanceM(reqEnd[1], reqEnd[0], routeEnd[1], routeEnd[0]);
+
+  return snapStart > MAX_SNAP_M || snapEnd > MAX_SNAP_M;
 }
 
 export async function fetchOsrmDirections(
@@ -58,12 +80,25 @@ export async function fetchOsrmDirections(
 
     if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) return null;
 
-    return data.routes.map((route: any): RouteOption => ({
-      polyline: route.geometry.coordinates as number[][],
-      distanceM: route.distance as number,
-      durationS: route.duration as number,
-      speedProfile: extractSpeedProfile(route.legs ?? []),
-    }));
+    const validRoutes: RouteOption[] = [];
+    for (const route of data.routes) {
+      const polyline = route.geometry.coordinates as number[][];
+
+      // Reject routes where OSRM snapped the start/end to a very different location
+      if (routeIsSnappedFar(coordinates, polyline)) {
+        console.warn('OSRM route rejected: start or end snapped more than 50 km from requested location');
+        continue;
+      }
+
+      validRoutes.push({
+        polyline,
+        distanceM: route.distance as number,
+        durationS: route.duration as number,
+        speedProfile: extractSpeedProfile(route.legs ?? []),
+      });
+    }
+
+    return validRoutes.length > 0 ? validRoutes : null;
   } catch (error) {
     console.error('OSRM directions error:', error);
     return null;
@@ -77,7 +112,8 @@ export async function fetchDirections(
   if (coordinates.length < 2) return null;
 
   const coordsString = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsString}?geometries=geojson&alternatives=true&access_token=${token}`;
+  // exclude=ferry ensures Mapbox also stays on roads only
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsString}?geometries=geojson&alternatives=true&exclude=ferry&access_token=${token}`;
 
   try {
     const res = await fetch(url);
@@ -86,12 +122,24 @@ export async function fetchDirections(
 
     if (!data.routes || data.routes.length === 0) return null;
 
-    return data.routes.map((route: any): RouteOption => ({
-      polyline: route.geometry.coordinates as number[][],
-      distanceM: route.distance as number,
-      durationS: route.duration as number,
-      speedProfile: [],
-    }));
+    const validRoutes: RouteOption[] = [];
+    for (const route of data.routes) {
+      const polyline = route.geometry.coordinates as number[][];
+
+      if (routeIsSnappedFar(coordinates, polyline)) {
+        console.warn('Mapbox route rejected: snapped too far from requested location');
+        continue;
+      }
+
+      validRoutes.push({
+        polyline,
+        distanceM: route.distance as number,
+        durationS: route.duration as number,
+        speedProfile: [],
+      });
+    }
+
+    return validRoutes.length > 0 ? validRoutes : null;
   } catch (error) {
     console.error('Directions error:', error);
     return null;
