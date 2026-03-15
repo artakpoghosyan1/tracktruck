@@ -1,6 +1,6 @@
-import { eq, and } from "drizzle-orm";
-import { db, routesTable, simulationStatesTable, shareLinksTable } from "@workspace/db";
-import { positionAlongPolyline } from "./geo";
+import { eq, and, asc } from "drizzle-orm";
+import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
+import { positionAlongPolyline, haversineM } from "./geo";
 import { broadcastToToken } from "../routes/ws";
 
 const TICK_INTERVAL_MS = 2000;
@@ -11,18 +11,64 @@ interface SpeedSegment {
   speedKmh: number;
 }
 
+interface StopEntry {
+  /** Distance along the polyline (metres from start) where this stop sits */
+  distanceAlongPolylineM: number;
+  durationS: number;
+  name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Speed-profile helpers
+// ---------------------------------------------------------------------------
+
+/** Return a copy of the profile with the first `fromDistM` metres removed */
+function trimSpeedProfile(profile: SpeedSegment[], fromDistM: number): SpeedSegment[] {
+  const result: SpeedSegment[] = [];
+  let remaining = fromDistM;
+  for (const seg of profile) {
+    if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
+    if (remaining >= seg.distanceM) {
+      remaining -= seg.distanceM;
+    } else if (remaining > 0) {
+      result.push({ distanceM: seg.distanceM - remaining, speedKmh: seg.speedKmh });
+      remaining = 0;
+    } else {
+      result.push(seg);
+    }
+  }
+  return result;
+}
+
+/** How many seconds does it take to travel `distanceM` metres using the profile? */
+function timeForDistance(distanceM: number, profile: SpeedSegment[], fallbackKmh: number): number {
+  let remaining = distanceM;
+  let totalS = 0;
+  for (const seg of profile) {
+    if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
+    const speedMs = (seg.speedKmh * 1000) / 3600;
+    const used = Math.min(seg.distanceM, remaining);
+    totalS += used / speedMs;
+    remaining -= used;
+    if (remaining <= 0) return totalS;
+  }
+  if (remaining > 0) {
+    totalS += remaining / ((fallbackKmh * 1000) / 3600);
+  }
+  return totalS;
+}
+
+/** How many metres does the truck travel in `elapsedS` seconds using the profile? */
 function computeDistanceWithSpeedProfile(
   elapsedS: number,
   speedProfile: SpeedSegment[],
   fallbackSpeedKmh: number,
 ): number {
   if (!speedProfile || speedProfile.length === 0) {
-    return elapsedS * (fallbackSpeedKmh * 1000 / 3600);
+    return elapsedS * ((fallbackSpeedKmh * 1000) / 3600);
   }
-
   let remainingS = elapsedS;
   let totalDistanceM = 0;
-
   for (const seg of speedProfile) {
     if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
     const segSpeedMs = (seg.speedKmh * 1000) / 3600;
@@ -34,13 +80,108 @@ function computeDistanceWithSpeedProfile(
     totalDistanceM += seg.distanceM;
     remainingS -= segTimeS;
   }
-
   if (remainingS > 0) {
-    totalDistanceM += remainingS * (fallbackSpeedKmh * 1000 / 3600);
+    totalDistanceM += remainingS * ((fallbackSpeedKmh * 1000) / 3600);
   }
-
   return totalDistanceM;
 }
+
+// ---------------------------------------------------------------------------
+// Stop projection
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the cumulative distance along the polyline to the vertex that is
+ * closest to (targetLat, targetLng).  We use this to map a stop's geographic
+ * coordinate to a "distance from start" value.
+ */
+function distanceAlongPolylineToNearestVertex(
+  polyline: number[][], // [lng, lat][]
+  targetLat: number,
+  targetLng: number,
+): number {
+  let minDist = Infinity;
+  let distAtMin = 0;
+  let cumDist = 0;
+
+  for (let i = 0; i < polyline.length; i++) {
+    const d = haversineM(polyline[i][1], polyline[i][0], targetLat, targetLng);
+    if (d < minDist) {
+      minDist = d;
+      distAtMin = cumDist;
+    }
+    if (i < polyline.length - 1) {
+      cumDist += haversineM(polyline[i][1], polyline[i][0], polyline[i + 1][1], polyline[i + 1][0]);
+    }
+  }
+  return distAtMin;
+}
+
+// ---------------------------------------------------------------------------
+// Stop-aware position calculation
+// ---------------------------------------------------------------------------
+
+interface PositionWithStop {
+  lat: number;
+  lng: number;
+  bearing: number;
+  distanceTraveledM: number;
+  progressPercent: number;
+  completed: boolean;
+  atStopName: string | null;
+}
+
+/**
+ * Given total elapsed seconds (including stop wait time), compute the truck's
+ * current position accounting for stops where it pauses.
+ */
+function computePositionWithStops(
+  totalElapsedS: number,
+  polyline: number[][],
+  sortedStops: StopEntry[],
+  speedProfile: SpeedSegment[],
+  fallbackSpeedKmh: number,
+): PositionWithStop {
+  let remainingS = totalElapsedS;
+  let travelDistConsumedM = 0;
+
+  for (const stop of sortedStops) {
+    const legDistM = stop.distanceAlongPolylineM - travelDistConsumedM;
+    if (legDistM <= 0) continue; // stop is behind current position (shouldn't happen if sorted)
+
+    // Time to drive from current position to this stop
+    const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
+    const legTimeS = timeForDistance(legDistM, trimmedProfile, fallbackSpeedKmh);
+
+    if (remainingS < legTimeS) {
+      // Still driving toward this stop
+      const additionalDistM = computeDistanceWithSpeedProfile(remainingS, trimmedProfile, fallbackSpeedKmh);
+      const pos = positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM);
+      return { ...pos, atStopName: null };
+    }
+
+    remainingS -= legTimeS;
+    travelDistConsumedM = stop.distanceAlongPolylineM;
+
+    if (remainingS < stop.durationS) {
+      // Truck is currently at this stop, waiting
+      const pos = positionAlongPolyline(polyline, stop.distanceAlongPolylineM);
+      return { ...pos, atStopName: stop.name };
+    }
+
+    remainingS -= stop.durationS;
+  }
+
+  // Past all stops — drive to destination
+  const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
+  const additionalDistM = computeDistanceWithSpeedProfile(remainingS, trimmedProfile, fallbackSpeedKmh);
+  const pos = positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM);
+  return { ...pos, atStopName: null };
+}
+
+// ---------------------------------------------------------------------------
+// Simulation tick
+// ---------------------------------------------------------------------------
 
 let tickCount = 0;
 
@@ -48,10 +189,7 @@ async function tick() {
   tickCount++;
 
   const activeRoutes = await db
-    .select({
-      route: routesTable,
-      simState: simulationStatesTable,
-    })
+    .select({ route: routesTable, simState: simulationStatesTable })
     .from(routesTable)
     .innerJoin(simulationStatesTable, eq(simulationStatesTable.routeId, routesTable.id))
     .where(eq(routesTable.status, "in_progress"));
@@ -65,16 +203,36 @@ async function tick() {
     const totalElapsedS = totalElapsedMs / 1000;
 
     const speedProfile = (route.speedProfile as SpeedSegment[] | null) || [];
-    const distanceTraveledM = computeDistanceWithSpeedProfile(totalElapsedS, speedProfile, route.truckSpeedKmh);
-
     const polyline = (route.polyline as number[][]) || [];
-    const pos = positionAlongPolyline(polyline, distanceTraveledM);
+
+    // Load stops for this route
+    const dbStops = await db
+      .select()
+      .from(routeStopsTable)
+      .where(eq(routeStopsTable.routeId, route.id))
+      .orderBy(asc(routeStopsTable.sortOrder));
+
+    // Project each stop onto the polyline
+    const sortedStops: StopEntry[] = dbStops.map((s) => ({
+      distanceAlongPolylineM: distanceAlongPolylineToNearestVertex(polyline, s.lat, s.lng),
+      durationS: s.durationMinutes * 60,
+      name: s.name,
+    })).sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
+
+    const pos = computePositionWithStops(
+      totalElapsedS,
+      polyline,
+      sortedStops,
+      speedProfile,
+      route.truckSpeedKmh,
+    );
 
     const snapshot = {
       type: "snapshot",
       routeId: route.id,
       timestamp: new Date().toISOString(),
-      status: pos.completed ? "completed" : "in_progress",
+      status: pos.completed ? "completed" : pos.atStopName ? "at_stop" : "in_progress",
+      atStopName: pos.atStopName ?? null,
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent,
       lat: pos.lat,
@@ -82,7 +240,7 @@ async function tick() {
       bearing: pos.bearing,
     };
 
-    // Get share tokens for this route and broadcast
+    // Broadcast to all active share links for this route
     const shareLinks = await db
       .select()
       .from(shareLinksTable)
@@ -110,13 +268,10 @@ async function tick() {
         })
         .where(eq(simulationStatesTable.routeId, route.id));
 
-      // Deactivate share links
       await db.update(shareLinksTable).set({ active: false }).where(eq(shareLinksTable.routeId, route.id));
-
       continue;
     }
 
-    // Save to DB every N ticks to reduce write load
     if (tickCount % DB_SAVE_INTERVAL_TICKS === 0) {
       await db
         .update(simulationStatesTable)

@@ -173,7 +173,14 @@ export default function RouteBuilder() {
     }
   }, [existingRoute]);
 
-  // Fetch route alternatives whenever start/end/stops change
+  // Only re-route when stop COORDINATES change, not when name/duration change.
+  // Using a string key avoids unnecessary re-routes on every keystroke in stop names.
+  const stopCoordKey = stops.map(s => `${s.lng.toFixed(6)},${s.lat.toFixed(6)}`).join('|');
+  // Keep a ref so the async callback always sees the latest stops list
+  const stopsRef = useRef(stops);
+  stopsRef.current = stops;
+
+  // Fetch route alternatives whenever start/end/stop positions change
   useEffect(() => {
     if (!start || !end) {
       setRouteOptions([]);
@@ -183,7 +190,7 @@ export default function RouteBuilder() {
     const t = setTimeout(async () => {
       setIsRouting(true);
       setRoutingError(null);
-      const coords = [[start.lng, start.lat], ...stops.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
+      const coords = [[start.lng, start.lat], ...stopsRef.current.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
 
       try {
         let options: RouteOption[] = [];
@@ -234,7 +241,8 @@ export default function RouteBuilder() {
       }
     }, 400);
     return () => clearTimeout(t);
-  }, [start, end, stops, mapboxToken]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, end, stopCoordKey, mapboxToken]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),

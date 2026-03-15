@@ -12,6 +12,7 @@ interface SnapshotData {
   routeId: number;
   timestamp: string;
   status: string;
+  atStopName: string | null;
   distanceTraveledM: number;
   progressPercent: number;
   lat: number | null;
@@ -173,6 +174,15 @@ export default function PublicTracking() {
               </div>
             </div>
 
+            {activeSnapshot?.atStopName && (
+              <div className="mt-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                <p className="text-sm font-semibold text-amber-800">
+                  Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
+                </p>
+              </div>
+            )}
+
             {activeSnapshot && (
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="bg-slate-50 rounded-xl p-3 text-center">
@@ -199,19 +209,23 @@ export default function PublicTracking() {
                 <MapPin className="w-4 h-4 text-primary" /> Waypoint Stops
               </h3>
               <div className="space-y-2">
-                {route.stops.map((stop, i) => (
-                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
-                    <div className="w-6 h-6 rounded-full border-2 border-primary/30 bg-white flex items-center justify-center text-primary font-bold text-xs shrink-0">
-                      {i + 1}
+                {route.stops.map((stop, i) => {
+                  const isCurrentStop = activeSnapshot?.atStopName === stop.name;
+                  return (
+                    <div key={i} className={`flex items-center gap-3 p-2.5 rounded-xl transition-colors ${isCurrentStop ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-400 bg-amber-400 text-white' : 'border-primary/30 bg-white text-primary'}`}>
+                        {isCurrentStop ? '●' : i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{stop.name}</p>
+                        {isCurrentStop && <p className="text-xs text-amber-600 font-semibold">Truck is here now</p>}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-slate-500 shrink-0">
+                        <Clock className="w-3 h-3" /> {stop.durationMinutes}m
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">{stop.name}</p>
-                    </div>
-                    <div className="flex items-center gap-1 text-xs text-slate-500 shrink-0">
-                      <Clock className="w-3 h-3" /> {stop.durationMinutes}m
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -346,6 +360,15 @@ export default function PublicTracking() {
               </p>
             </div>
           </div>
+
+          {activeSnapshot?.atStopName && (
+            <div className="mb-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <p className="text-sm font-semibold text-amber-800">
+                Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
+              </p>
+            </div>
+          )}
 
           <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
             <div
