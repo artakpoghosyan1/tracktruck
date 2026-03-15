@@ -58,9 +58,10 @@ export function AddressSearch({
   const [isOpen, setIsOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const inputRef = useRef<HTMLInputElement>(null);
+  const isFocused = useRef(false);
 
   useEffect(() => {
-    if (value !== undefined && value !== query) {
+    if (value !== undefined && value !== query && !isFocused.current) {
       setQuery(value);
     }
   }, [value]);
@@ -109,8 +110,8 @@ export function AddressSearch({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => suggestions.length > 0 && setIsOpen(true)}
-          onBlur={() => setTimeout(() => setIsOpen(false), 150)}
+          onFocus={() => { isFocused.current = true; suggestions.length > 0 && setIsOpen(true); }}
+          onBlur={() => { isFocused.current = false; setTimeout(() => setIsOpen(false), 150); }}
           placeholder={placeholder}
           className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-background border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
         />
