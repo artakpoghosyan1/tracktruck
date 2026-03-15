@@ -234,7 +234,7 @@ export default function RouteBuilder() {
   };
 
   return (
-    <div className="h-[calc(100vh-2rem)] flex flex-col -m-6 md:-m-10">
+    <div className="h-screen flex flex-col overflow-hidden">
       <MapboxPrompt />
       
       {/* Header */}

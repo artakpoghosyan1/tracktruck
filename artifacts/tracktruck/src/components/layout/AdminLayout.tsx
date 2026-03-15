@@ -1,10 +1,15 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Map, LayoutDashboard, Truck, Settings, LogOut, Loader2 } from "lucide-react";
+import { Map, LayoutDashboard, Truck, LogOut, Loader2 } from "lucide-react";
 import { useAuthMe, getAuthMeQueryKey } from "@workspace/api-client-react";
 import { useAppStore } from "@/store/use-app-store";
 
-export function AdminLayout({ children }: { children: ReactNode }) {
+interface AdminLayoutProps {
+  children: ReactNode;
+  fullscreen?: boolean;
+}
+
+export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) {
   const [location, setLocation] = useLocation();
   const { setAuthenticated } = useAppStore();
   
@@ -17,7 +22,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background">
+      <div className="h-screen flex flex-col items-center justify-center bg-background">
         <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
         <p className="text-muted-foreground font-medium animate-pulse">Loading workspace...</p>
       </div>
@@ -43,9 +48,9 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   ];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col md:flex-row">
+    <div className="h-screen overflow-hidden bg-background flex flex-col md:flex-row">
       {/* Sidebar */}
-      <aside className="w-full md:w-72 bg-card border-r border-border/60 flex flex-col shadow-sm z-10 relative">
+      <aside className="w-full md:w-72 bg-card border-r border-border/60 flex flex-col shadow-sm z-10 shrink-0">
         <div className="p-6 flex items-center gap-3 border-b border-border/50">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-blue-400 flex items-center justify-center shadow-lg shadow-primary/20">
             <Truck className="w-6 h-6 text-white" />
@@ -56,7 +61,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         
-        <div className="p-4 flex-1">
+        <div className="p-4 flex-1 overflow-y-auto">
           <nav className="space-y-2">
             {navItems.map((item) => {
               const active = location === item.href || (item.href !== '/admin' && location.startsWith(item.href));
@@ -79,7 +84,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </nav>
         </div>
 
-        <div className="p-4 border-t border-border/50 bg-muted/20">
+        <div className="p-4 border-t border-border/50 bg-muted/20 shrink-0">
           <div className="flex items-center gap-3 mb-4 px-2">
             <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
               {user.name.charAt(0).toUpperCase()}
@@ -100,10 +105,16 @@ export function AdminLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 h-screen overflow-y-auto">
-        <div className="p-6 md:p-10 max-w-7xl mx-auto">
-          {children}
-        </div>
+      <main className="flex-1 min-h-0 overflow-y-auto">
+        {fullscreen ? (
+          <div className="h-full flex flex-col">
+            {children}
+          </div>
+        ) : (
+          <div className="p-6 md:p-10 max-w-7xl mx-auto">
+            {children}
+          </div>
+        )}
       </main>
     </div>
   );
