@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation, useParams } from "wouter";
-import Map, { Marker, Source, Layer, MapRef } from "react-map-gl";
+import Map, { Marker, Source, Layer, MapRef, Popup } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, CreditCard, Flag, GripVertical,
-  Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings
+  Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
+  MapPin, X,
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -27,6 +28,34 @@ interface Stop {
   lng: number;
   durationMinutes: number;
   dbId?: number;
+}
+
+interface MapClickState {
+  lng: number;
+  lat: number;
+  label: string;
+  loading: boolean;
+}
+
+async function reverseGeocode(lat: number, lng: number, mapboxToken?: string | null): Promise<string> {
+  try {
+    if (mapboxToken) {
+      const res = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&limit=1`
+      );
+      const data = await res.json();
+      return data.features?.[0]?.place_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    } else {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+        { headers: { 'Accept-Language': 'en' } }
+      );
+      const data = await res.json();
+      return data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+  } catch {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
 }
 
 function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration }: {
@@ -93,6 +122,7 @@ export default function RouteBuilder() {
   const [duration, setDuration] = useState(0);
   const [showAddStop, setShowAddStop] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [mapClick, setMapClick] = useState<MapClickState | null>(null);
 
   const { data: existingRoute } = useGetRoute(routeId || 0, {
     query: { queryKey: getGetRouteQueryKey(routeId || 0), enabled: !!routeId },
@@ -166,6 +196,29 @@ export default function RouteBuilder() {
       lat: result.lat, lng: result.lng, durationMinutes: 15,
     }]);
     setShowAddStop(false);
+  };
+
+  const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
+    const { lng, lat } = e.lngLat;
+    setMapClick({ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, loading: true });
+    const label = await reverseGeocode(lat, lng, mapboxToken);
+    setMapClick({ lng, lat, label, loading: false });
+  }, [mapboxToken]);
+
+  const applyMapClick = (type: 'start' | 'end' | 'stop') => {
+    if (!mapClick) return;
+    const shortLabel = mapClick.label.split(',')[0].trim();
+    if (type === 'start') {
+      setStart({ lng: mapClick.lng, lat: mapClick.lat, label: mapClick.label });
+    } else if (type === 'end') {
+      setEnd({ lng: mapClick.lng, lat: mapClick.lat, label: mapClick.label });
+    } else {
+      setStops(prev => [...prev, {
+        id: `client-${Date.now()}`, name: shortLabel,
+        lat: mapClick.lat, lng: mapClick.lng, durationMinutes: 15,
+      }]);
+    }
+    setMapClick(null);
   };
 
   const handleSave = async (isActivate: boolean) => {
@@ -248,7 +301,7 @@ export default function RouteBuilder() {
           </Link>
           <div>
             <h1 className="text-base font-bold font-display leading-tight">{routeId ? "Edit Route" : "Create New Route"}</h1>
-            <p className="text-xs text-muted-foreground">Search start and end locations below, then save or activate</p>
+            <p className="text-xs text-muted-foreground">Search locations or click the map to place start, end &amp; stops</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -310,7 +363,14 @@ export default function RouteBuilder() {
 
             {/* Route Points */}
             <div className="space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Route Points *</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Route Points *</h3>
+                {mapboxToken && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <MapPin className="w-3 h-3" /> Click map to place
+                  </span>
+                )}
+              </div>
 
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-2">
@@ -440,12 +500,17 @@ export default function RouteBuilder() {
                 zoom: start ? 7 : 2,
               }}
               mapStyle="mapbox://styles/mapbox/light-v11"
+              cursor="crosshair"
+              onClick={handleMapClick}
             >
+              {/* Start marker */}
               {start && (
                 <Marker longitude={start.lng} latitude={start.lat} anchor="center">
                   <div className="w-5 h-5 bg-black rounded-full border-2 border-white shadow-lg" />
                 </Marker>
               )}
+
+              {/* End marker */}
               {end && (
                 <Marker longitude={end.lng} latitude={end.lat} anchor="center">
                   <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shadow-xl border-2 border-white">
@@ -453,6 +518,8 @@ export default function RouteBuilder() {
                   </div>
                 </Marker>
               )}
+
+              {/* Stop markers */}
               {stops.map((stop, i) => (
                 <Marker key={stop.id} longitude={stop.lng} latitude={stop.lat} anchor="center">
                   <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center text-primary shadow-lg border-2 border-primary font-bold text-xs">
@@ -460,6 +527,8 @@ export default function RouteBuilder() {
                   </div>
                 </Marker>
               ))}
+
+              {/* Route polyline */}
               {polyline.length >= 2 && (
                 <Source type="geojson" data={geojsonLine}>
                   <Layer
@@ -468,6 +537,77 @@ export default function RouteBuilder() {
                     paint={{ 'line-color': 'hsl(239 84% 67%)', 'line-width': 5, 'line-opacity': 0.85 }}
                   />
                 </Source>
+              )}
+
+              {/* Map-click popup */}
+              {mapClick && (
+                <Popup
+                  longitude={mapClick.lng}
+                  latitude={mapClick.lat}
+                  anchor="bottom"
+                  closeButton={false}
+                  closeOnClick={false}
+                  className="map-click-popup"
+                  maxWidth="260px"
+                >
+                  <div className="bg-white rounded-xl shadow-xl border border-border overflow-hidden" style={{ minWidth: 220 }}>
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2 border-b border-border/50">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-foreground mb-0.5">Place on map</p>
+                        {mapClick.loading ? (
+                          <p className="text-xs text-muted-foreground animate-pulse">Looking up address…</p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{mapClick.label}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setMapClick(null)}
+                        className="p-0.5 text-muted-foreground hover:text-foreground rounded shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="p-2 space-y-1">
+                      <button
+                        onClick={() => applyMapClick('start')}
+                        disabled={mapClick.loading}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50 text-left"
+                      >
+                        <div className="w-3 h-3 rounded-full bg-black shrink-0" />
+                        Set as Start
+                      </button>
+                      <button
+                        onClick={() => applyMapClick('end')}
+                        disabled={mapClick.loading}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50 text-left"
+                      >
+                        <div className="w-3 h-3 rounded-full bg-primary shrink-0" />
+                        Set as End
+                      </button>
+                      <button
+                        onClick={() => applyMapClick('stop')}
+                        disabled={mapClick.loading}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50 text-left"
+                      >
+                        <div className="w-3 h-3 rounded-full bg-white border-2 border-primary shrink-0" />
+                        Add as Waypoint Stop
+                      </button>
+                    </div>
+                  </div>
+                </Popup>
+              )}
+
+              {/* Map hint overlay */}
+              {!start && !end && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
+                  <div className="bg-black/70 text-white text-xs font-medium px-4 py-2 rounded-full flex items-center gap-2 shadow-lg backdrop-blur-sm">
+                    <MapPin className="w-3.5 h-3.5" />
+                    Click anywhere on the map to place start or end points
+                  </div>
+                </div>
               )}
             </Map>
           ) : (
@@ -478,7 +618,7 @@ export default function RouteBuilder() {
               <div className="text-center max-w-sm">
                 <p className="font-bold text-foreground text-lg mb-2">Map preview disabled</p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Configure a Mapbox token to see your route on a map and get real road directions.
+                  Configure a Mapbox token to see your route on a map, click to place points, and get real road directions.
                   Address search works with OpenStreetMap either way.
                 </p>
                 <button
@@ -494,7 +634,7 @@ export default function RouteBuilder() {
                     <div className="w-3 h-3 rounded-full bg-black mt-0.5 shrink-0" />
                     <span className="text-foreground line-clamp-2">{start.label}</span>
                   </div>
-                  {stops.map((s, i) => (
+                  {stops.map((s) => (
                     <div key={s.id} className="flex items-start gap-2 mb-2 pl-1">
                       <div className="w-2 h-2 rounded-full bg-primary/50 mt-1 shrink-0" />
                       <span className="text-muted-foreground text-xs">{s.name}</span>

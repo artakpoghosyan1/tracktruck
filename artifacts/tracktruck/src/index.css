@@ -114,3 +114,15 @@
   overflow: hidden !important;
   border: 1px solid hsl(var(--border)) !important;
 }
+
+/* Map-click popup: let our custom div handle all styling */
+.map-click-popup .mapboxgl-popup-content {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+.map-click-popup .mapboxgl-popup-tip {
+  border-top-color: white !important;
+}
