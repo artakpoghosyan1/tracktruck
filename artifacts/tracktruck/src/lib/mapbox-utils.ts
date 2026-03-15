@@ -65,6 +65,16 @@ function routeIsSnappedFar(
   return snapStart > MAX_SNAP_M || snapEnd > MAX_SNAP_M;
 }
 
+/** Returns true if any step in the route uses a ferry (crosses water) */
+function routeContainsFerry(legs: any[]): boolean {
+  for (const leg of legs) {
+    for (const step of leg.steps ?? []) {
+      if (step.mode === 'ferry') return true;
+    }
+  }
+  return false;
+}
+
 export async function fetchOsrmDirections(
   coordinates: number[][]
 ): Promise<RouteOption[] | null> {
@@ -90,6 +100,12 @@ export async function fetchOsrmDirections(
         continue;
       }
 
+      // Reject routes that cross water via ferry
+      if (routeContainsFerry(route.legs ?? [])) {
+        console.warn('OSRM route rejected: contains ferry crossing');
+        continue;
+      }
+
       validRoutes.push({
         polyline,
         distanceM: route.distance as number,
@@ -112,12 +128,18 @@ export async function fetchDirections(
   if (coordinates.length < 2) return null;
 
   const coordsString = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
-  // exclude=ferry ensures Mapbox also stays on roads only
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsString}?geometries=geojson&alternatives=true&exclude=ferry&access_token=${token}`;
+  // overview=full returns the complete detailed polyline (not simplified)
+  // exclude=ferry ensures Mapbox stays on roads only (no sea crossings)
+  // steps=true needed to read step-level annotations
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsString}?geometries=geojson&overview=full&steps=true&alternatives=true&exclude=ferry&access_token=${token}`;
 
   try {
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch directions');
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.error('Mapbox Directions error:', res.status, errBody);
+      throw new Error(`Mapbox request failed: ${res.status}`);
+    }
     const data = await res.json();
 
     if (!data.routes || data.routes.length === 0) return null;

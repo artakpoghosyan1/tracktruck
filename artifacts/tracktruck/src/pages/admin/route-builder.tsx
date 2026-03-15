@@ -135,6 +135,7 @@ export default function RouteBuilder() {
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [routingError, setRoutingError] = useState<string | null>(null);
 
   // The currently chosen route data
   const selectedRoute = routeOptions[selectedIdx] ?? null;
@@ -176,10 +177,12 @@ export default function RouteBuilder() {
   useEffect(() => {
     if (!start || !end) {
       setRouteOptions([]);
+      setRoutingError(null);
       return;
     }
     const t = setTimeout(async () => {
       setIsRouting(true);
+      setRoutingError(null);
       const coords = [[start.lng, start.lat], ...stops.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
 
       try {
@@ -218,9 +221,11 @@ export default function RouteBuilder() {
           }
         } else {
           setRouteOptions([]);
+          const errMsg = "No road route found — these locations cannot be connected by road without crossing water. Check that both points are reachable by vehicle on the same landmass.";
+          setRoutingError(errMsg);
           toast({
             title: "No road route found",
-            description: "These two locations cannot be connected by road. Check that both points are on the same landmass and reachable by vehicle.",
+            description: errMsg,
             variant: "destructive",
           });
         }
@@ -472,6 +477,14 @@ export default function RouteBuilder() {
             </div>
 
             <hr className="border-border/50" />
+
+            {/* Routing error — persistent inline message when no road route found */}
+            {!isRouting && routingError && routeOptions.length === 0 && (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3">
+                <p className="text-xs font-semibold text-destructive mb-0.5">No road route found</p>
+                <p className="text-xs text-destructive/80">{routingError}</p>
+              </div>
+            )}
 
             {/* Route Alternatives */}
             {(isRouting || routeOptions.length > 0) && (
