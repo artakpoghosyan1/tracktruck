@@ -17,6 +17,7 @@ export const routesTable = pgTable("routes", {
   endLng: doublePrecision("end_lng").notNull(),
   truckSpeedKmh: doublePrecision("truck_speed_kmh").notNull().default(60),
   polyline: jsonb("polyline").$type<number[][]>().default([]),
+  speedProfile: jsonb("speed_profile").$type<{ distanceM: number; speedKmh: number }[]>().default([]),
   distanceM: doublePrecision("distance_m").notNull().default(0),
   estimatedDurationS: doublePrecision("estimated_duration_s").notNull().default(0),
   deletedAt: timestamp("deleted_at"),

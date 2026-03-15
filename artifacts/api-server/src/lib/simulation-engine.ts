@@ -6,6 +6,42 @@ import { broadcastToToken } from "../routes/ws";
 const TICK_INTERVAL_MS = 2000;
 const DB_SAVE_INTERVAL_TICKS = 5;
 
+interface SpeedSegment {
+  distanceM: number;
+  speedKmh: number;
+}
+
+function computeDistanceWithSpeedProfile(
+  elapsedS: number,
+  speedProfile: SpeedSegment[],
+  fallbackSpeedKmh: number,
+): number {
+  if (!speedProfile || speedProfile.length === 0) {
+    return elapsedS * (fallbackSpeedKmh * 1000 / 3600);
+  }
+
+  let remainingS = elapsedS;
+  let totalDistanceM = 0;
+
+  for (const seg of speedProfile) {
+    if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
+    const segSpeedMs = (seg.speedKmh * 1000) / 3600;
+    const segTimeS = seg.distanceM / segSpeedMs;
+    if (remainingS <= segTimeS) {
+      totalDistanceM += remainingS * segSpeedMs;
+      return totalDistanceM;
+    }
+    totalDistanceM += seg.distanceM;
+    remainingS -= segTimeS;
+  }
+
+  if (remainingS > 0) {
+    totalDistanceM += remainingS * (fallbackSpeedKmh * 1000 / 3600);
+  }
+
+  return totalDistanceM;
+}
+
 let tickCount = 0;
 
 async function tick() {
@@ -26,9 +62,10 @@ async function tick() {
     const nowMs = Date.now();
     const wallElapsedMs = nowMs - simState.startedAt.getTime();
     const totalElapsedMs = simState.effectiveElapsedMs + wallElapsedMs;
+    const totalElapsedS = totalElapsedMs / 1000;
 
-    const speedMs = (route.truckSpeedKmh * 1000) / 3600; // metres per second
-    const distanceTraveledM = (totalElapsedMs / 1000) * speedMs;
+    const speedProfile = (route.speedProfile as SpeedSegment[] | null) || [];
+    const distanceTraveledM = computeDistanceWithSpeedProfile(totalElapsedS, speedProfile, route.truckSpeedKmh);
 
     const polyline = (route.polyline as number[][]) || [];
     const pos = positionAlongPolyline(polyline, distanceTraveledM);

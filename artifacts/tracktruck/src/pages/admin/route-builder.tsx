@@ -16,7 +16,7 @@ import { MapboxPrompt } from "@/components/MapboxPrompt";
 import { AddressSearch } from "@/components/AddressSearch";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
-import { fetchDirections, straightLinePolyline } from "@/lib/mapbox-utils";
+import { fetchDirections, fetchOsrmDirections, type SpeedSegment } from "@/lib/mapbox-utils";
 import { useCreateRoute, useUpdateRoute, useGetRoute, useCreatePayment, getGetRouteQueryKey } from "@workspace/api-client-react";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
@@ -118,6 +118,7 @@ export default function RouteBuilder() {
   const [end, setEnd] = useState<RoutePoint | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
   const [polyline, setPolyline] = useState<number[][]>([]);
+  const [speedProfile, setSpeedProfile] = useState<SpeedSegment[]>([]);
   const [distance, setDistance] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showAddStop, setShowAddStop] = useState(false);
@@ -138,6 +139,7 @@ export default function RouteBuilder() {
     setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
     setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
     setPolyline(existingRoute.polyline || []);
+    setSpeedProfile(existingRoute.speedProfile ?? []);
     setDistance(existingRoute.distanceM || 0);
     setDuration(existingRoute.estimatedDurationS || 0);
     setStops(existingRoute.stops.map(s => ({
@@ -146,32 +148,44 @@ export default function RouteBuilder() {
     })));
   }, [existingRoute]);
 
-  // Recalculate route geometry when start/end/stops change
   useEffect(() => {
     if (!start || !end) return;
     const t = setTimeout(async () => {
+      const coords = [[start.lng, start.lat], ...stops.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
+
+      const fitMap = () => {
+        if (mapRef.current) {
+          const bounds = new mapboxgl.LngLatBounds([start.lng, start.lat], [start.lng, start.lat]);
+          coords.forEach(c => bounds.extend(c as [number, number]));
+          mapRef.current.fitBounds(bounds, { padding: 80, duration: 800 });
+        }
+      };
+
+      const osrmRes = await fetchOsrmDirections(coords);
+      const osrmProfile = osrmRes?.speedProfile ?? [];
+
       if (mapboxToken) {
-        const coords = [[start.lng, start.lat], ...stops.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
-        const res = await fetchDirections(coords, mapboxToken);
-        if (res) {
-          setPolyline(res.polyline);
-          setDistance(res.distanceM);
-          setDuration(res.durationS);
-          if (mapRef.current) {
-            const bounds = new mapboxgl.LngLatBounds([start.lng, start.lat], [start.lng, start.lat]);
-            coords.forEach(c => bounds.extend(c as [number, number]));
-            mapRef.current.fitBounds(bounds, { padding: 80, duration: 800 });
-          }
+        const mbRes = await fetchDirections(coords, mapboxToken);
+        if (mbRes) {
+          setPolyline(mbRes.polyline);
+          setSpeedProfile(osrmProfile);
+          setDistance(mbRes.distanceM);
+          setDuration(mbRes.durationS);
+          fitMap();
           return;
         }
       }
-      const { polyline: line, distanceM } = straightLinePolyline(start.lat, start.lng, end.lat, end.lng);
-      setPolyline(line);
-      setDistance(distanceM);
-      setDuration(Math.round(distanceM / ((speed * 1000) / 3600)));
+
+      if (osrmRes) {
+        setPolyline(osrmRes.polyline);
+        setSpeedProfile(osrmProfile);
+        setDistance(osrmRes.distanceM);
+        setDuration(osrmRes.durationS);
+        fitMap();
+      }
     }, 400);
     return () => clearTimeout(t);
-  }, [start, end, stops, mapboxToken, speed]);
+  }, [start, end, stops, mapboxToken]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -239,6 +253,7 @@ export default function RouteBuilder() {
         endLat: end.lat, endLng: end.lng,
         truckSpeedKmh: speed,
         polyline,
+        speedProfile,
       };
 
       let savedRoute;
@@ -479,9 +494,7 @@ export default function RouteBuilder() {
                     <p className="text-lg font-bold text-emerald-800">{fmt.dur(duration)}</p>
                   </div>
                 </div>
-                {!mapboxToken && (
-                  <p className="text-xs text-emerald-600/70 mt-2">* Straight-line estimate. Add Mapbox token for road directions.</p>
-                )}
+                <p className="text-xs text-emerald-600/70 mt-2">Route via real road geometry (OSRM)</p>
               </div>
             )}
 
@@ -646,7 +659,7 @@ export default function RouteBuilder() {
                   </div>
                   {distance > 0 && (
                     <div className="mt-3 pt-3 border-t border-border/50 text-xs text-muted-foreground">
-                      Straight-line: {fmt.dist(distance)} · Est. {fmt.dur(duration)}
+                      Distance: {fmt.dist(distance)} · Est. {fmt.dur(duration)}
                     </div>
                   )}
                 </div>

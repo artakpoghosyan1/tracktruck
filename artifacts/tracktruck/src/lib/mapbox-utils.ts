@@ -16,6 +16,59 @@ export function straightLinePolyline(lat1: number, lng1: number, lat2: number, l
   };
 }
 
+export interface SpeedSegment {
+  distanceM: number;
+  speedKmh: number;
+}
+
+export async function fetchOsrmDirections(
+  coordinates: number[][] // array of [lng, lat]
+): Promise<{
+  polyline: number[][];
+  distanceM: number;
+  durationS: number;
+  speedProfile: SpeedSegment[];
+} | null> {
+  if (coordinates.length < 2) return null;
+
+  const coordsString = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson&steps=true&annotations=speed`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('OSRM request failed');
+    const data = await res.json();
+
+    if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) return null;
+
+    const route = data.routes[0];
+    const polyline = route.geometry.coordinates as number[][];
+    const distanceM = route.distance as number;
+    const durationS = route.duration as number;
+
+    const speedProfile: SpeedSegment[] = [];
+    for (const leg of route.legs) {
+      for (const step of leg.steps) {
+        if (step.distance > 0 && step.duration > 0) {
+          const speedMs = step.distance / step.duration;
+          const speedKmh = speedMs * 3.6;
+          if (isFinite(speedKmh) && speedKmh > 0) {
+            speedProfile.push({
+              distanceM: step.distance,
+              speedKmh,
+            });
+          }
+        }
+      }
+    }
+
+    return { polyline, distanceM, durationS, speedProfile };
+  } catch (error) {
+    console.error('OSRM directions error:', error);
+    return null;
+  }
+}
+
 export async function fetchDirections(
   coordinates: number[][], // array of [lng, lat]
   token: string

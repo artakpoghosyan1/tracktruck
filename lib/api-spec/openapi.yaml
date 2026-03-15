@@ -803,6 +803,18 @@ components:
               type: number
             minItems: 2
             maxItems: 2
+        speedProfile:
+          type: array
+          items:
+            type: object
+            properties:
+              distanceM:
+                type: number
+              speedKmh:
+                type: number
+            required:
+              - distanceM
+              - speedKmh
       required:
         - name
         - startLat
@@ -833,6 +845,18 @@ components:
               type: number
             minItems: 2
             maxItems: 2
+        speedProfile:
+          type: array
+          items:
+            type: object
+            properties:
+              distanceM:
+                type: number
+              speedKmh:
+                type: number
+            required:
+              - distanceM
+              - speedKmh
 
     RouteListItem:
       type: object
@@ -913,6 +937,18 @@ components:
               type: number
             minItems: 2
             maxItems: 2
+        speedProfile:
+          type: array
+          items:
+            type: object
+            properties:
+              distanceM:
+                type: number
+              speedKmh:
+                type: number
+            required:
+              - distanceM
+              - speedKmh
         distanceM:
           type: number
         estimatedDurationS:

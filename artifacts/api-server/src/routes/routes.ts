@@ -105,7 +105,7 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
 
 router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh = 60, polyline = [] } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh = 60, polyline = [], speedProfile = [] } = req.body as {
     name: string;
     startLat: number;
     startLng: number;
@@ -113,11 +113,28 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     endLng: number;
     truckSpeedKmh?: number;
     polyline?: number[][];
+    speedProfile?: { distanceM: number; speedKmh: number }[];
   };
 
   const { totalPolylineDistance } = await import("../lib/geo");
   const distanceM = polyline.length > 1 ? totalPolylineDistance(polyline) : 0;
-  const estimatedDurationS = truckSpeedKmh > 0 ? (distanceM / 1000 / truckSpeedKmh) * 3600 : 0;
+
+  let estimatedDurationS = truckSpeedKmh > 0 ? (distanceM / 1000 / truckSpeedKmh) * 3600 : 0;
+  if (speedProfile.length > 0) {
+    let dur = 0;
+    let profDist = 0;
+    for (const seg of speedProfile) {
+      if (seg.speedKmh > 0 && seg.distanceM > 0) {
+        dur += seg.distanceM / (seg.speedKmh * 1000 / 3600);
+        profDist += seg.distanceM;
+      }
+    }
+    const remaining = distanceM - profDist;
+    if (remaining > 0 && truckSpeedKmh > 0) {
+      dur += remaining / (truckSpeedKmh * 1000 / 3600);
+    }
+    estimatedDurationS = dur;
+  }
 
   const [route] = await db
     .insert(routesTable)
@@ -130,6 +147,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
       endLng,
       truckSpeedKmh,
       polyline,
+      speedProfile,
       distanceM,
       estimatedDurationS,
       status: "draft",
@@ -146,6 +164,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     endLng: route.endLng,
     truckSpeedKmh: route.truckSpeedKmh,
     polyline: route.polyline,
+    speedProfile: route.speedProfile,
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
     paymentStatus: null,
@@ -192,6 +211,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     endLng: route.endLng,
     truckSpeedKmh: route.truckSpeedKmh,
     polyline: route.polyline,
+    speedProfile: route.speedProfile,
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
     paymentStatus: payment?.status ?? null,
@@ -228,7 +248,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     return;
   }
 
-  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh, polyline } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh, polyline, speedProfile } = req.body as {
     name?: string;
     startLat?: number;
     startLng?: number;
@@ -236,13 +256,31 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     endLng?: number;
     truckSpeedKmh?: number;
     polyline?: number[][];
+    speedProfile?: { distanceM: number; speedKmh: number }[];
   };
 
   const newPolyline = polyline ?? existing.polyline ?? [];
   const newSpeed = truckSpeedKmh ?? existing.truckSpeedKmh;
+  const newSpeedProfile = speedProfile ?? (existing.speedProfile as { distanceM: number; speedKmh: number }[] | null) ?? [];
   const { totalPolylineDistance } = await import("../lib/geo");
   const distanceM = newPolyline.length > 1 ? totalPolylineDistance(newPolyline) : existing.distanceM;
-  const estimatedDurationS = newSpeed > 0 ? (distanceM / 1000 / newSpeed) * 3600 : existing.estimatedDurationS;
+
+  let estimatedDurationS = newSpeed > 0 ? (distanceM / 1000 / newSpeed) * 3600 : existing.estimatedDurationS;
+  if (newSpeedProfile.length > 0) {
+    let dur = 0;
+    let profDist = 0;
+    for (const seg of newSpeedProfile) {
+      if (seg.speedKmh > 0 && seg.distanceM > 0) {
+        dur += seg.distanceM / (seg.speedKmh * 1000 / 3600);
+        profDist += seg.distanceM;
+      }
+    }
+    const remaining = distanceM - profDist;
+    if (remaining > 0 && newSpeed > 0) {
+      dur += remaining / (newSpeed * 1000 / 3600);
+    }
+    estimatedDurationS = dur;
+  }
 
   const [updated] = await db
     .update(routesTable)
@@ -254,6 +292,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
       ...(endLng !== undefined && { endLng }),
       ...(truckSpeedKmh !== undefined && { truckSpeedKmh }),
       ...(polyline !== undefined && { polyline }),
+      ...(speedProfile !== undefined && { speedProfile }),
       distanceM,
       estimatedDurationS,
       updatedAt: new Date(),
@@ -271,6 +310,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     endLng: updated.endLng,
     truckSpeedKmh: updated.truckSpeedKmh,
     polyline: updated.polyline,
+    speedProfile: updated.speedProfile,
     distanceM: updated.distanceM,
     estimatedDurationS: updated.estimatedDurationS,
     paymentStatus: null,

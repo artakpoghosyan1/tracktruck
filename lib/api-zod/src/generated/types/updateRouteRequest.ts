@@ -5,6 +5,7 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { UpdateRouteRequestSpeedProfileItem } from "./updateRouteRequestSpeedProfileItem";
 
 export interface UpdateRouteRequest {
   name?: string;
@@ -14,4 +15,5 @@ export interface UpdateRouteRequest {
   endLng?: number;
   truckSpeedKmh?: number;
   polyline?: number[][];
+  speedProfile?: UpdateRouteRequestSpeedProfileItem[];
 }

@@ -112,7 +112,7 @@ export const ListRoutesQueryParams = zod.object({
   page: zod.coerce.number().default(listRoutesQueryPageDefault),
   page_size: zod.coerce
     .number()
-    .refine((v) => [10, 25, 50].includes(v), { message: "Must be 10, 25, or 50" })
+    .refine((v) => [10, 25, 50].includes(v), { message: "page_size must be 10, 25, or 50" })
     .default(listRoutesQueryPageSizeDefault),
   status: zod
     .enum(["draft", "ready", "in_progress", "paused", "completed", "expired"])
@@ -174,6 +174,14 @@ export const CreateRouteBody = zod.object({
         .max(createRouteBodyPolylineItemMax),
     )
     .optional(),
+  speedProfile: zod
+    .array(
+      zod.object({
+        distanceM: zod.number(),
+        speedKmh: zod.number(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -208,6 +216,14 @@ export const GetRouteResponse = zod.object({
       .min(getRouteResponsePolylineItemMin)
       .max(getRouteResponsePolylineItemMax),
   ),
+  speedProfile: zod
+    .array(
+      zod.object({
+        distanceM: zod.number(),
+        speedKmh: zod.number(),
+      }),
+    )
+    .optional(),
   distanceM: zod.number(),
   estimatedDurationS: zod.number(),
   paymentStatus: zod.string().nullish(),
@@ -255,6 +271,14 @@ export const UpdateRouteBody = zod.object({
         .max(updateRouteBodyPolylineItemMax),
     )
     .optional(),
+  speedProfile: zod
+    .array(
+      zod.object({
+        distanceM: zod.number(),
+        speedKmh: zod.number(),
+      }),
+    )
+    .optional(),
 });
 
 export const updateRouteResponsePolylineItemMin = 2;
@@ -282,6 +306,14 @@ export const UpdateRouteResponse = zod.object({
       .min(updateRouteResponsePolylineItemMin)
       .max(updateRouteResponsePolylineItemMax),
   ),
+  speedProfile: zod
+    .array(
+      zod.object({
+        distanceM: zod.number(),
+        speedKmh: zod.number(),
+      }),
+    )
+    .optional(),
   distanceM: zod.number(),
   estimatedDurationS: zod.number(),
   paymentStatus: zod.string().nullish(),

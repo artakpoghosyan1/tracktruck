@@ -52,6 +52,11 @@ export interface AuthResponse {
   user: UserProfile;
 }
 
+export type CreateRouteRequestSpeedProfileItem = {
+  distanceM: number;
+  speedKmh: number;
+};
+
 export interface CreateRouteRequest {
   name: string;
   startLat: number;
@@ -60,7 +65,13 @@ export interface CreateRouteRequest {
   endLng: number;
   truckSpeedKmh?: number;
   polyline?: number[][];
+  speedProfile?: CreateRouteRequestSpeedProfileItem[];
 }
+
+export type UpdateRouteRequestSpeedProfileItem = {
+  distanceM: number;
+  speedKmh: number;
+};
 
 export interface UpdateRouteRequest {
   name?: string;
@@ -70,6 +81,7 @@ export interface UpdateRouteRequest {
   endLng?: number;
   truckSpeedKmh?: number;
   polyline?: number[][];
+  speedProfile?: UpdateRouteRequestSpeedProfileItem[];
 }
 
 export type RouteListItemStatus =
@@ -113,6 +125,11 @@ export const RouteDetailStatus = {
   expired: "expired",
 } as const;
 
+export type RouteDetailSpeedProfileItem = {
+  distanceM: number;
+  speedKmh: number;
+};
+
 export interface RouteStop {
   id: number;
   routeId: number;
@@ -134,6 +151,7 @@ export interface RouteDetail {
   endLng: number;
   truckSpeedKmh: number;
   polyline: number[][];
+  speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;
   estimatedDurationS: number;
   paymentStatus?: string | null;

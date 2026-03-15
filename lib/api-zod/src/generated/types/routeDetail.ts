@@ -5,6 +5,7 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RouteDetailSpeedProfileItem } from "./routeDetailSpeedProfileItem";
 import type { RouteDetailStatus } from "./routeDetailStatus";
 import type { RouteStop } from "./routeStop";
 
@@ -18,6 +19,7 @@ export interface RouteDetail {
   endLng: number;
   truckSpeedKmh: number;
   polyline: number[][];
+  speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;
   estimatedDurationS: number;
   paymentStatus?: string | null;
