@@ -652,7 +652,7 @@ export default function RouteBuilder() {
                     <Layer
                       id={`alt-line-${i}`}
                       type="line"
-                      paint={{ 'line-color': '#cbd5e1', 'line-width': 4, 'line-opacity': 0.7 }}
+                      paint={{ 'line-color': '#94a3b8', 'line-width': 4, 'line-opacity': 0.9 }}
                     />
                   </Source>
                 );
@@ -664,7 +664,7 @@ export default function RouteBuilder() {
                   <Layer
                     id="selected-line"
                     type="line"
-                    paint={{ 'line-color': 'hsl(239 84% 67%)', 'line-width': 5, 'line-opacity': 0.9 }}
+                    paint={{ 'line-color': '#3b3ef4', 'line-width': 6, 'line-opacity': 1 }}
                   />
                 </Source>
               )}
