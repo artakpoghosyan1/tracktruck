@@ -59,15 +59,22 @@ export function AddressSearch({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const inputRef = useRef<HTMLInputElement>(null);
   const isFocused = useRef(false);
+  const suppressSearch = useRef(false);
 
   useEffect(() => {
     if (value !== undefined && value !== query && !isFocused.current) {
+      suppressSearch.current = true;
       setQuery(value);
     }
   }, [value]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
+
+    if (suppressSearch.current) {
+      suppressSearch.current = false;
+      return;
+    }
 
     if (!query.trim() || query.length < 2) {
       setSuggestions([]);

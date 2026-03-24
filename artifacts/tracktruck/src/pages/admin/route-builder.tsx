@@ -180,6 +180,9 @@ export default function RouteBuilder() {
   const stopsRef = useRef(stops);
   stopsRef.current = stops;
 
+  // Use a generation counter to discard stale async routing responses
+  const routingGen = useRef(0);
+
   // Fetch route alternatives whenever start/end/stop positions change
   useEffect(() => {
     if (!start || !end) {
@@ -187,6 +190,7 @@ export default function RouteBuilder() {
       setRoutingError(null);
       return;
     }
+    const gen = ++routingGen.current;
     const t = setTimeout(async () => {
       setIsRouting(true);
       setRoutingError(null);
@@ -216,6 +220,9 @@ export default function RouteBuilder() {
           if (osrmOptions) options = osrmOptions;
         }
 
+        // Discard stale response if a newer routing request has started
+        if (gen !== routingGen.current) return;
+
         if (options.length > 0) {
           setRouteOptions(options);
           setSelectedIdx(0);
@@ -237,7 +244,7 @@ export default function RouteBuilder() {
           });
         }
       } finally {
-        setIsRouting(false);
+        if (gen === routingGen.current) setIsRouting(false);
       }
     }, 400);
     return () => clearTimeout(t);
@@ -629,9 +636,9 @@ export default function RouteBuilder() {
               ref={mapRef}
               mapboxAccessToken={mapboxToken}
               initialViewState={{
-                longitude: start?.lng ?? 20,
-                latitude: start?.lat ?? 40,
-                zoom: start ? 7 : 2,
+                longitude: start?.lng ?? -98.5795,
+                latitude: start?.lat ?? 39.8283,
+                zoom: start ? 7 : 4,
               }}
               mapStyle="mapbox://styles/mapbox/light-v11"
               cursor="crosshair"
