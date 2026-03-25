@@ -6,7 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, Zap, Flag, GripVertical,
   Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
-  MapPin, X, CheckCircle2, Loader2,
+  MapPin, X, CheckCircle2, Loader2, Play, Pause, RotateCcw,
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -17,7 +17,7 @@ import { AddressSearch } from "@/components/AddressSearch";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
-import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, getGetRouteQueryKey } from "@workspace/api-client-react";
+import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, useStartRoute, usePauseRoute, useResumeRoute, useResetRoute } from "@workspace/api-client-react";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
 
@@ -146,12 +146,34 @@ export default function RouteBuilder() {
   const duration = selectedRoute?.durationS ?? 0;
   const speedProfile: SpeedSegment[] = selectedRoute?.speedProfile ?? [];
 
-  const { data: existingRoute } = useGetRoute(routeId || 0, {
-    query: { queryKey: getGetRouteQueryKey(routeId || 0), enabled: !!routeId },
+  const { data: existingRoute, refetch: refetchRoute } = useGetRoute(routeId || 0, {
+    query: { enabled: !!routeId },
   });
   const createMut = useCreateRoute();
   const updateMut = useUpdateRoute();
   const activateMut = useActivateRoute();
+
+  const startMut = useStartRoute();
+  const pauseMut = usePauseRoute();
+  const resumeMut = useResumeRoute();
+  const resetMut = useResetRoute();
+  const [simActionLoading, setSimActionLoading] = useState<string | null>(null);
+
+  const handleSimAction = async (action: 'start' | 'pause' | 'resume' | 'reset') => {
+    if (!routeId) return;
+    setSimActionLoading(action);
+    try {
+      if (action === 'start') await startMut.mutateAsync({ id: routeId });
+      if (action === 'pause') await pauseMut.mutateAsync({ id: routeId });
+      if (action === 'resume') await resumeMut.mutateAsync({ id: routeId });
+      if (action === 'reset') await resetMut.mutateAsync({ id: routeId });
+      await refetchRoute();
+    } catch {
+      toast({ title: "Error", description: `Failed to ${action} simulation.`, variant: "destructive" });
+    } finally {
+      setSimActionLoading(null);
+    }
+  };
 
   useEffect(() => {
     if (!existingRoute) return;
@@ -467,6 +489,49 @@ export default function RouteBuilder() {
           >
             <Settings className="w-4 h-4" />
           </button>
+
+          {/* Simulation controls — shown only when an existing route is ready/active/paused */}
+          {routeId && existingRoute?.status === 'ready' && (
+            <button
+              onClick={() => handleSimAction('start')}
+              disabled={!!simActionLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
+            >
+              {simActionLoading === 'start' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+              Start
+            </button>
+          )}
+          {routeId && existingRoute?.status === 'in_progress' && (
+            <button
+              onClick={() => handleSimAction('pause')}
+              disabled={!!simActionLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white hover:bg-amber-600 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
+            >
+              {simActionLoading === 'pause' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pause className="w-4 h-4 fill-current" />}
+              Pause
+            </button>
+          )}
+          {routeId && existingRoute?.status === 'paused' && (
+            <button
+              onClick={() => handleSimAction('resume')}
+              disabled={!!simActionLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
+            >
+              {simActionLoading === 'resume' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+              Resume
+            </button>
+          )}
+          {routeId && ['in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '') && (
+            <button
+              onClick={() => handleSimAction('reset')}
+              disabled={!!simActionLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+            >
+              {simActionLoading === 'reset' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+              Reset
+            </button>
+          )}
+
           <button
             onClick={() => handleSave(false)}
             disabled={isSaving}
@@ -707,7 +772,7 @@ export default function RouteBuilder() {
                 latitude: start?.lat ?? 39.8283,
                 zoom: start ? 7 : 4,
               }}
-              mapStyle="mapbox://styles/mapbox/light-v11"
+              mapStyle="mapbox://styles/mapbox/streets-v12"
               cursor="crosshair"
               onClick={handleMapClick}
             >
@@ -745,9 +810,12 @@ export default function RouteBuilder() {
 
               {/* End marker */}
               {end && (
-                <Marker longitude={end.lng} latitude={end.lat} anchor="center">
-                  <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shadow-xl border-2 border-white">
-                    <Navigation className="w-4 h-4 fill-current" />
+                <Marker longitude={end.lng} latitude={end.lat} anchor="bottom">
+                  <div className="flex flex-col items-center">
+                    <div className="w-9 h-9 bg-red-500 rounded-full flex items-center justify-center text-white shadow-xl border-2 border-white">
+                      <Flag className="w-4 h-4 fill-current" />
+                    </div>
+                    <div className="w-0.5 h-3 bg-red-500" />
                   </div>
                 </Marker>
               )}
