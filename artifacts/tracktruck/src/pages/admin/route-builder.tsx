@@ -171,6 +171,36 @@ export default function RouteBuilder() {
     }
   }, [existingRoute]);
 
+  // --- Draft persistence (new routes only) ---
+  const DRAFT_KEY = 'tracktruck_route_draft';
+
+  // Restore draft on mount (new route only)
+  useEffect(() => {
+    if (routeId) return;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { name?: string; start?: RoutePoint; end?: RoutePoint; stops?: Stop[] };
+      if (draft.name) setName(draft.name);
+      if (draft.start) setStart(draft.start);
+      if (draft.end) setEnd(draft.end);
+      if (draft.stops?.length) setStops(draft.stops);
+      toast({ title: "Draft restored", description: "Your unsaved route data has been recovered." });
+    } catch {
+      // ignore corrupt draft
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save draft on every change (new route only)
+  useEffect(() => {
+    if (routeId) return;
+    if (!name && !start && !end && stops.length === 0) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ name, start, end, stops }));
+    } catch { /* ignore */ }
+  }, [name, start, end, stops, routeId]);
+
   // Only re-route when stop COORDINATES change, not when name/duration change.
   // Using a string key avoids unnecessary re-routes on every keystroke in stop names.
   const stopCoordKey = stops.map(s => `${s.lng.toFixed(6)},${s.lat.toFixed(6)}`).join('|');
@@ -344,6 +374,7 @@ export default function RouteBuilder() {
       } else {
         toast({ title: "Draft Saved", description: `"${savedRoute.name}" saved successfully.` });
       }
+      localStorage.removeItem('tracktruck_route_draft');
       setLocation('/admin');
     } catch (err: any) {
       const msg = err?.data?.message || err?.message || "Failed to save route";

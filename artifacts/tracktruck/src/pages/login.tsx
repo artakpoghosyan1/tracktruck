@@ -12,13 +12,15 @@ export default function Login() {
   const { setAuthenticated } = useAppStore();
   const { toast } = useToast();
 
+  const returnUrl = new URLSearchParams(window.location.search).get("returnUrl");
+
   const loginMutation = useAuthLogin({
     mutation: {
       onSuccess: (data) => {
         localStorage.setItem('tracktruck_token', data.accessToken);
         setAuthenticated(true);
         toast({ title: "Welcome back!", description: "Successfully signed in." });
-        setLocation("/admin");
+        setLocation(returnUrl && returnUrl.startsWith('/admin') ? returnUrl : "/admin");
       },
       onError: (err: Error) => {
         toast({ 

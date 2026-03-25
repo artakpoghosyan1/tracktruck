@@ -20,7 +20,8 @@ window.fetch = async (resource, config) => {
   if (response.status === 401 && !resource.toString().includes('/auth/login')) {
     localStorage.removeItem('tracktruck_token');
     if (window.location.pathname.startsWith('/admin')) {
-      window.location.href = '/login';
+      const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.href = `/login?returnUrl=${returnUrl}`;
     }
   }
 
