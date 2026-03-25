@@ -249,7 +249,7 @@ export default function PublicTracking() {
           ref={mapRef}
           mapboxAccessToken={mapboxToken}
           initialViewState={{ longitude: route.startLng, latitude: route.startLat, zoom: 6 }}
-          mapStyle="mapbox://styles/mapbox/navigation-day-v1"
+          mapStyle="mapbox://styles/mapbox/streets-v12"
         >
           {/* Live Truck */}
           {activeSnapshot?.lat != null && activeSnapshot?.lng != null && (
