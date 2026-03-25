@@ -1,7 +1,7 @@
 import { eq, and, asc } from "drizzle-orm";
 import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
 import { positionAlongPolyline, haversineM } from "./geo";
-import { broadcastToToken } from "../routes/ws";
+import { broadcastToToken, broadcastToRoute } from "../routes/ws";
 
 const TICK_INTERVAL_MS = 2000;
 const DB_SAVE_INTERVAL_TICKS = 5;
@@ -264,6 +264,9 @@ async function tick() {
     for (const sl of shareLinks) {
       broadcastToToken(sl.token, snapshot);
     }
+
+    // Also broadcast to any admin clients watching this route live
+    broadcastToRoute(route.id, snapshot);
 
     if (pos.completed) {
       await db

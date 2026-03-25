@@ -131,6 +131,9 @@ export default function RouteBuilder() {
   const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
 
+  // Live truck position for in-progress routes
+  const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedKmh: number } | null>(null);
+
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -170,6 +173,44 @@ export default function RouteBuilder() {
       setSelectedIdx(0);
     }
   }, [existingRoute]);
+
+  // --- Admin live WebSocket: show truck position when route is in_progress ---
+  useEffect(() => {
+    if (!routeId || existingRoute?.status !== 'in_progress') {
+      setLiveSnapshot(null);
+      return;
+    }
+
+    const jwt = localStorage.getItem('tracktruck_token');
+    if (!jwt) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/admin/ws/routes/${routeId}?token=${encodeURIComponent(jwt)}`;
+
+    let ws: WebSocket;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.lat !== undefined && data.lng !== undefined) {
+            setLiveSnapshot({ lat: data.lat, lng: data.lng, bearing: data.bearing ?? 0, speedKmh: data.speedKmh ?? 0 });
+          }
+        } catch { }
+      };
+      ws.onclose = () => {
+        reconnectTimer = setTimeout(connect, 4000);
+      };
+    };
+
+    connect();
+    return () => {
+      clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+    };
+  }, [routeId, existingRoute?.status]);
 
   // --- Draft persistence (new routes only) ---
   const DRAFT_KEY = 'tracktruck_route_draft';
@@ -719,6 +760,24 @@ export default function RouteBuilder() {
                   </div>
                 </Marker>
               ))}
+
+              {/* Live truck marker (admin view, in_progress only) */}
+              {liveSnapshot && (
+                <Marker longitude={liveSnapshot.lng} latitude={liveSnapshot.lat} anchor="center">
+                  <div className="relative flex items-center justify-center">
+                    <div className="absolute w-12 h-12 rounded-full bg-primary/25 animate-ping" />
+                    <div
+                      className="relative z-10 drop-shadow-xl transition-transform duration-300"
+                      style={{ transform: `rotate(${liveSnapshot.bearing}deg)` }}
+                    >
+                      <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
+                        <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5"/>
+                        <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white"/>
+                      </svg>
+                    </div>
+                  </div>
+                </Marker>
+              )}
 
               {/* Map-click popup */}
               {mapClick && (
