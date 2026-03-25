@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, isNull } from "drizzle-orm";
 import crypto from "crypto";
-import { db, routesTable, simulationStatesTable, shareLinksTable, paymentOrdersTable } from "@workspace/db";
+import { db, routesTable, simulationStatesTable, shareLinksTable } from "@workspace/db";
 import {
   ActivateRouteParams,
   StartRouteParams,
@@ -38,22 +38,6 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     return;
   }
 
-  // Create mock payment
-  const paymentReference = `PAY-${crypto.randomBytes(8).toString("hex").toUpperCase()}`;
-  const [payment] = await db
-    .insert(paymentOrdersTable)
-    .values({
-      routeId,
-      userId: authReq.userId,
-      amount: 5000,
-      currency: "AMD",
-      status: "paid",
-      paymentReference,
-      transactionId: `TXN-${crypto.randomBytes(6).toString("hex").toUpperCase()}`,
-      paidAt: new Date(),
-    })
-    .returning();
-
   // Move route to ready
   await db.update(routesTable).set({ status: "ready", updatedAt: new Date() }).where(eq(routesTable.id, routeId));
 
@@ -82,8 +66,6 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     routeId,
     status: "ready",
     shareToken: token,
-    paymentId: payment.id,
-    paymentStatus: "paid",
   });
 });
 

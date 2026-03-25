@@ -58,6 +58,13 @@ function timeForDistance(distanceM: number, profile: SpeedSegment[], fallbackKmh
   return totalS;
 }
 
+/** Current speed (km/h) at a given distance along the route */
+function speedAtDistanceM(profile: SpeedSegment[], distanceM: number, fallbackKmh: number): number {
+  if (!profile || profile.length === 0) return fallbackKmh;
+  const remaining = trimSpeedProfile(profile, distanceM);
+  return remaining.length > 0 ? remaining[0].speedKmh : fallbackKmh;
+}
+
 /** How many metres does the truck travel in `elapsedS` seconds using the profile? */
 function computeDistanceWithSpeedProfile(
   elapsedS: number,
@@ -227,6 +234,10 @@ async function tick() {
       route.truckSpeedKmh,
     );
 
+    const currentSpeedKmh = pos.atStopName
+      ? 0
+      : Math.round(speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh));
+
     const snapshot = {
       type: "snapshot",
       routeId: route.id,
@@ -238,6 +249,7 @@ async function tick() {
       lat: pos.lat,
       lng: pos.lng,
       bearing: pos.bearing,
+      speedKmh: currentSpeedKmh,
     };
 
     // Broadcast to all active share links for this route

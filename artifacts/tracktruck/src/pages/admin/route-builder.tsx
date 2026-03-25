@@ -4,7 +4,7 @@ import Map, { Marker, Source, Layer, MapRef, Popup } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
-  ArrowLeft, Save, CreditCard, Flag, GripVertical,
+  ArrowLeft, Save, Zap, Flag, GripVertical,
   Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
   MapPin, X, CheckCircle2, Loader2,
 } from "lucide-react";
@@ -17,7 +17,7 @@ import { AddressSearch } from "@/components/AddressSearch";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
-import { useCreateRoute, useUpdateRoute, useGetRoute, useCreatePayment, getGetRouteQueryKey } from "@workspace/api-client-react";
+import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, getGetRouteQueryKey } from "@workspace/api-client-react";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
 
@@ -123,7 +123,6 @@ export default function RouteBuilder() {
   const mapRef = useRef<MapRef>(null);
 
   const [name, setName] = useState("");
-  const [speed, setSpeed] = useState(60);
   const [start, setStart] = useState<RoutePoint | null>(null);
   const [end, setEnd] = useState<RoutePoint | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
@@ -149,12 +148,11 @@ export default function RouteBuilder() {
   });
   const createMut = useCreateRoute();
   const updateMut = useUpdateRoute();
-  const paymentMut = useCreatePayment();
+  const activateMut = useActivateRoute();
 
   useEffect(() => {
     if (!existingRoute) return;
     setName(existingRoute.name);
-    setSpeed(existingRoute.truckSpeedKmh);
     setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
     setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
     setStops(existingRoute.stops.map(s => ({
@@ -315,7 +313,7 @@ export default function RouteBuilder() {
         name: name.trim(),
         startLat: start.lat, startLng: start.lng,
         endLat: end.lat, endLng: end.lng,
-        truckSpeedKmh: speed,
+        truckSpeedKmh: 80,
         polyline,
         speedProfile,
       };
@@ -341,7 +339,7 @@ export default function RouteBuilder() {
       }
 
       if (isActivate) {
-        await paymentMut.mutateAsync({ data: { routeId: savedRoute.id, amount: 5000 } });
+        await activateMut.mutateAsync({ id: savedRoute.id });
         toast({ title: "Route Activated!", description: "Your route is ready. Press Play on the dashboard to start tracking." });
       } else {
         toast({ title: "Draft Saved", description: `"${savedRoute.name}" saved successfully.` });
@@ -404,7 +402,7 @@ export default function RouteBuilder() {
             disabled={isSaving}
             className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-primary to-blue-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
           >
-            <CreditCard className="w-4 h-4" /> Activate Route
+            <Zap className="w-4 h-4" /> Activate Route
           </button>
         </div>
       </header>
@@ -424,17 +422,6 @@ export default function RouteBuilder() {
                   type="text" value={name} onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. City Center to Airport"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-card border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5 flex justify-between items-center">
-                  <span>Truck Speed</span>
-                  <span className="text-primary normal-case font-semibold">{speed} km/h</span>
-                </label>
-                <input
-                  type="range" min={30} max={120} step={5}
-                  value={speed} onChange={(e) => setSpeed(Number(e.target.value))}
-                  className="w-full accent-primary"
                 />
               </div>
             </div>

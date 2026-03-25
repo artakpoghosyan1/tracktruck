@@ -3,7 +3,6 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import routesRouter from "./routes";
 import simulationRouter from "./simulation";
-import paymentsRouter from "./payments";
 import publicRouter from "./public";
 
 const router: IRouter = Router();
@@ -14,7 +13,6 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(authRouter);
 router.use(publicRouter);
-router.use(paymentsRouter);
 router.use(simulationRouter);
 router.use(routesRouter);
 

@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "wouter";
-import Map, { Marker, Source, Layer, MapRef } from "react-map-gl";
+import Map, { Marker, MapRef } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { Truck, Navigation, AlertTriangle, CheckCircle2, MapPin, Clock, Map as MapIcon } from "lucide-react";
+import { Truck, AlertTriangle, CheckCircle2, MapPin, Clock, Map as MapIcon, Gauge } from "lucide-react";
 import { useAppStore } from "@/store/use-app-store";
 import { useGetPublicTrack, getGetPublicTrackQueryKey } from "@workspace/api-client-react";
 
@@ -18,6 +18,7 @@ interface SnapshotData {
   lat: number | null;
   lng: number | null;
   bearing: number | null;
+  speedKmh?: number;
 }
 
 export default function PublicTracking() {
@@ -115,11 +116,6 @@ export default function PublicTracking() {
       </div>
     );
   }
-
-  const geojsonLine: GeoJSON.Feature<GeoJSON.LineString> = {
-    type: 'Feature', properties: {},
-    geometry: { type: 'LineString', coordinates: route.polyline },
-  };
 
   const isLive = route.status === 'in_progress';
 
@@ -281,40 +277,6 @@ export default function PublicTracking() {
           initialViewState={{ longitude: route.startLng, latitude: route.startLat, zoom: 6 }}
           mapStyle="mapbox://styles/mapbox/navigation-day-v1"
         >
-          <Source type="geojson" data={geojsonLine}>
-            <Layer
-              id="route-line-bg"
-              type="line"
-              paint={{ 'line-color': '#94a3b8', 'line-width': 6, 'line-opacity': 0.4 }}
-            />
-            <Layer
-              id="route-line"
-              type="line"
-              paint={{ 'line-color': '#4F46E5', 'line-width': 5, 'line-opacity': 0.85 }}
-            />
-          </Source>
-
-          {/* Start */}
-          <Marker longitude={route.startLng} latitude={route.startLat} anchor="center">
-            <div className="w-4 h-4 bg-black rounded-full border-2 border-white shadow-md" />
-          </Marker>
-
-          {/* End */}
-          <Marker longitude={route.endLng} latitude={route.endLat} anchor="center">
-            <div className="w-7 h-7 bg-red-500 rounded-full flex items-center justify-center text-white border-2 border-white shadow-lg">
-              <Navigation className="w-3.5 h-3.5 fill-current" />
-            </div>
-          </Marker>
-
-          {/* Stops */}
-          {route.stops.map((stop, i) => (
-            <Marker key={i} longitude={stop.lng} latitude={stop.lat} anchor="center">
-              <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center text-primary shadow-md border-2 border-primary font-bold text-xs">
-                {i + 1}
-              </div>
-            </Marker>
-          ))}
-
           {/* Live Truck */}
           {activeSnapshot?.lat != null && activeSnapshot?.lng != null && (
             <Marker
@@ -352,12 +314,23 @@ export default function PublicTracking() {
               </div>
               <h2 className="text-lg font-bold text-slate-900">{route.routeName}</h2>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-slate-500 mb-0.5">Distance Covered</p>
-              <p className="text-xl font-bold text-slate-900">
-                {activeSnapshot ? (activeSnapshot.distanceTraveledM / 1000).toFixed(1) : "0.0"}
-                <span className="text-sm font-normal text-slate-400 ml-1">km</span>
-              </p>
+            <div className="flex gap-4">
+              <div className="text-right">
+                <p className="text-xs text-slate-500 mb-0.5">Distance Covered</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {activeSnapshot ? (activeSnapshot.distanceTraveledM / 1000).toFixed(1) : "0.0"}
+                  <span className="text-sm font-normal text-slate-400 ml-1">km</span>
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-slate-500 mb-0.5 flex items-center justify-end gap-1">
+                  <Gauge className="w-3 h-3" /> Speed
+                </p>
+                <p className="text-xl font-bold text-slate-900">
+                  {activeSnapshot?.speedKmh ?? 0}
+                  <span className="text-sm font-normal text-slate-400 ml-1">km/h</span>
+                </p>
+              </div>
             </div>
           </div>
 
