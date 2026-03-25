@@ -76,7 +76,6 @@ export default function PublicTracking() {
   }, [route, mapboxToken]);
 
   const activeSnapshot = snapshot || route?.snapshot;
-  const progress = activeSnapshot ? Math.min(100, Math.max(0, activeSnapshot.progressPercent)) : 0;
 
   if (isLoading) {
     return (
@@ -145,29 +144,22 @@ export default function PublicTracking() {
         </header>
 
         <div className="flex-1 p-5 max-w-xl mx-auto w-full space-y-4">
-          {/* Route Card */}
+          {/* Status Card */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <div className="flex items-center gap-2 mb-1">
-              <span className={`inline-flex w-2 h-2 rounded-full ${isLive ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                {route.status.replace('_', ' ')}
-              </span>
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-4">{route.routeName}</h2>
-
-            {/* Progress */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs font-semibold text-slate-500">
-                <span>Start</span>
-                <span className="text-primary">{progress.toFixed(0)}% complete</span>
-                <span>Destination</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex w-2 h-2 rounded-full ${isLive ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {route.status.replace('_', ' ')}
+                </span>
               </div>
-              <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-1000"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+              {activeSnapshot && (
+                <div className="flex items-center gap-1.5">
+                  <Gauge className="w-4 h-4 text-slate-400" />
+                  <span className="text-2xl font-bold text-slate-900 tabular-nums">{activeSnapshot.speedKmh ?? 0}</span>
+                  <span className="text-sm text-slate-400">km/h</span>
+                </div>
+              )}
             </div>
 
             {activeSnapshot?.atStopName && (
@@ -176,24 +168,6 @@ export default function PublicTracking() {
                 <p className="text-sm font-semibold text-amber-800">
                   Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
                 </p>
-              </div>
-            )}
-
-            {activeSnapshot && (
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 rounded-xl p-3 text-center">
-                  <p className="text-xs text-slate-500 mb-0.5">Covered</p>
-                  <p className="text-lg font-bold text-slate-900">
-                    {(activeSnapshot.distanceTraveledM / 1000).toFixed(1)}
-                    <span className="text-sm font-normal text-slate-400 ml-1">km</span>
-                  </p>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3 text-center">
-                  <p className="text-xs text-slate-500 mb-0.5">Progress</p>
-                  <p className="text-lg font-bold text-slate-900">
-                    {progress.toFixed(1)}<span className="text-sm font-normal text-slate-400">%</span>
-                  </p>
-                </div>
               </div>
             )}
           </div>
@@ -306,59 +280,34 @@ export default function PublicTracking() {
 
       {/* Bottom Panel */}
       <div className="absolute bottom-5 inset-x-4 z-10 pointer-events-none">
-        <div className="max-w-2xl mx-auto bg-white/95 backdrop-blur-xl rounded-3xl p-5 shadow-2xl border border-white/50 pointer-events-auto">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="relative flex h-2.5 w-2.5">
-                  {isLive && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
-                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                </span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  {route.status.replace('_', ' ')}
-                </span>
-              </div>
-              <h2 className="text-lg font-bold text-slate-900">{route.routeName}</h2>
+        <div className="max-w-2xl mx-auto bg-white/95 backdrop-blur-xl rounded-3xl px-5 py-4 shadow-2xl border border-white/50 pointer-events-auto">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                {isLive && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
+                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                {route.status.replace('_', ' ')}
+              </span>
             </div>
-            <div className="flex gap-4">
-              <div className="text-right">
-                <p className="text-xs text-slate-500 mb-0.5">Distance Covered</p>
-                <p className="text-xl font-bold text-slate-900">
-                  {activeSnapshot ? (activeSnapshot.distanceTraveledM / 1000).toFixed(1) : "0.0"}
-                  <span className="text-sm font-normal text-slate-400 ml-1">km</span>
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs text-slate-500 mb-0.5 flex items-center justify-end gap-1">
-                  <Gauge className="w-3 h-3" /> Speed
-                </p>
-                <p className="text-xl font-bold text-slate-900">
-                  {activeSnapshot?.speedKmh ?? 0}
-                  <span className="text-sm font-normal text-slate-400 ml-1">km/h</span>
-                </p>
-              </div>
-            </div>
-          </div>
 
-          {activeSnapshot?.atStopName && (
-            <div className="mb-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-              <p className="text-sm font-semibold text-amber-800">
-                Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
-              </p>
-            </div>
-          )}
+            {activeSnapshot?.atStopName ? (
+              <div className="flex-1 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                <p className="text-sm font-semibold text-amber-800 truncate">
+                  Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
+                </p>
+              </div>
+            ) : <div className="flex-1" />}
 
-          <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-primary to-blue-400 rounded-full transition-all duration-1000 ease-out"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-1.5 text-xs font-semibold text-slate-400">
-            <span>Start</span>
-            <span className="text-primary">{progress.toFixed(0)}%</span>
-            <span>Destination</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Gauge className="w-4 h-4 text-slate-400" />
+              <span className="text-2xl font-bold text-slate-900 tabular-nums">
+                {activeSnapshot?.speedKmh ?? 0}
+              </span>
+              <span className="text-sm font-normal text-slate-400">km/h</span>
+            </div>
           </div>
         </div>
       </div>

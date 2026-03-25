@@ -234,9 +234,12 @@ async function tick() {
       route.truckSpeedKmh,
     );
 
+    const baseSpeedKmh = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
+    // Add smooth sinusoidal fluctuation so speed feels natural rather than constant
+    const fluctuation = Math.sin(totalElapsedS / 22) * 7 + Math.sin(totalElapsedS / 7) * 3;
     const currentSpeedKmh = pos.atStopName
       ? 0
-      : Math.round(speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh));
+      : Math.max(10, Math.round(baseSpeedKmh + fluctuation));
 
     const snapshot = {
       type: "snapshot",
