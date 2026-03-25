@@ -201,17 +201,10 @@ export default function RouteBuilder() {
     } catch { /* ignore */ }
   }, [name, start, end, stops, routeId]);
 
-  // Only re-route when stop COORDINATES change, not when name/duration change.
-  // Using a string key avoids unnecessary re-routes on every keystroke in stop names.
-  const stopCoordKey = stops.map(s => `${s.lng.toFixed(6)},${s.lat.toFixed(6)}`).join('|');
-  // Keep a ref so the async callback always sees the latest stops list
-  const stopsRef = useRef(stops);
-  stopsRef.current = stops;
-
   // Use a generation counter to discard stale async routing responses
   const routingGen = useRef(0);
 
-  // Fetch route alternatives whenever start/end/stop positions change
+  // Fetch route alternatives whenever start/end changes — stops do NOT affect the route calculation
   useEffect(() => {
     if (!start || !end) {
       setRouteOptions([]);
@@ -222,7 +215,7 @@ export default function RouteBuilder() {
     const t = setTimeout(async () => {
       setIsRouting(true);
       setRoutingError(null);
-      const coords = [[start.lng, start.lat], ...stopsRef.current.map(s => [s.lng, s.lat]), [end.lng, end.lat]];
+      const coords = [[start.lng, start.lat], [end.lng, end.lat]];
 
       try {
         let options: RouteOption[] = [];
@@ -277,7 +270,7 @@ export default function RouteBuilder() {
     }, 400);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [start, end, stopCoordKey, mapboxToken]);
+  }, [start, end, mapboxToken]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -304,8 +297,22 @@ export default function RouteBuilder() {
     setShowAddStop(false);
   };
 
+  const showAddStopRef = useRef(showAddStop);
+  showAddStopRef.current = showAddStop;
+
   const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
     const { lng, lat } = e.lngLat;
+    if (showAddStopRef.current) {
+      // Stop mode: instantly place a stop marker, geocode label in the background
+      const tempId = `client-${Date.now()}`;
+      setStops(prev => [...prev, { id: tempId, name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng, durationMinutes: 15 }]);
+      reverseGeocode(lat, lng, mapboxToken).then(label => {
+        const shortLabel = label.split(',')[0].trim();
+        setStops(prev => prev.map(s => s.id === tempId ? { ...s, name: shortLabel } : s));
+      });
+      return;
+    }
+    // Normal mode: show popup for start/end placement
     setMapClick({ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, loading: true });
     const label = await reverseGeocode(lat, lng, mapboxToken);
     setMapClick({ lng, lat, label, loading: false });
@@ -582,23 +589,25 @@ export default function RouteBuilder() {
                 </h3>
                 <button
                   onClick={() => setShowAddStop(!showAddStop)}
-                  className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+                  className={`flex items-center gap-1 text-xs font-semibold transition-colors rounded-lg px-2 py-1 ${
+                    showAddStop
+                      ? 'bg-primary text-white hover:bg-primary/90'
+                      : 'text-primary hover:text-primary/80 hover:bg-primary/5'
+                  }`}
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add Stop
+                  {showAddStop ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                  {showAddStop ? 'Done' : 'Add Stop'}
                 </button>
               </div>
 
               {showAddStop && (
                 <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 space-y-2">
-                  <p className="text-xs font-medium text-foreground">Search for a waypoint stop:</p>
+                  <p className="text-xs font-medium text-foreground">Search by name or click the map to drop a stop:</p>
                   <AddressSearch
                     placeholder="e.g. Port, Warehouse, Checkpoint..."
                     mapboxToken={mapboxToken}
                     onSelect={handleAddStop}
                   />
-                  <button onClick={() => setShowAddStop(false)} className="text-xs text-muted-foreground hover:text-foreground">
-                    Cancel
-                  </button>
                 </div>
               )}
 
@@ -757,14 +766,6 @@ export default function RouteBuilder() {
                         <div className="w-3 h-3 rounded-full bg-primary shrink-0" />
                         Set as End
                       </button>
-                      <button
-                        onClick={() => applyMapClick('stop')}
-                        disabled={mapClick.loading}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50 text-left"
-                      >
-                        <div className="w-3 h-3 rounded-full bg-white border-2 border-primary shrink-0" />
-                        Add as Waypoint Stop
-                      </button>
                     </div>
                   </div>
                 </Popup>
@@ -781,14 +782,21 @@ export default function RouteBuilder() {
               )}
 
               {/* Map hint */}
-              {!start && !end && (
+              {showAddStop ? (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none z-10">
+                  <div className="bg-primary/90 text-white text-xs font-medium px-4 py-2 rounded-full flex items-center gap-2 shadow-lg backdrop-blur-sm">
+                    <Plus className="w-3.5 h-3.5" />
+                    Click anywhere on the map to drop a stop marker
+                  </div>
+                </div>
+              ) : !start && !end ? (
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
                   <div className="bg-black/70 text-white text-xs font-medium px-4 py-2 rounded-full flex items-center gap-2 shadow-lg backdrop-blur-sm">
                     <MapPin className="w-3.5 h-3.5" />
                     Click anywhere on the map to place start or end points
                   </div>
                 </div>
-              )}
+              ) : null}
             </Map>
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center gap-5 p-8">
