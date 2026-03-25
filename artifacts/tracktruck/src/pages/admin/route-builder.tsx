@@ -289,9 +289,8 @@ export default function RouteBuilder() {
   };
 
   const handleAddStop = (result: { placeName: string; lng: number; lat: number }) => {
-    const label = result.placeName.split(',')[0].trim();
     setStops(prev => [...prev, {
-      id: `client-${Date.now()}`, name: label,
+      id: `client-${Date.now()}`, name: result.placeName,
       lat: result.lat, lng: result.lng, durationMinutes: 15,
     }]);
     setShowAddStop(false);
@@ -307,8 +306,7 @@ export default function RouteBuilder() {
       const tempId = `client-${Date.now()}`;
       setStops(prev => [...prev, { id: tempId, name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng, durationMinutes: 15 }]);
       reverseGeocode(lat, lng, mapboxToken).then(label => {
-        const shortLabel = label.split(',')[0].trim();
-        setStops(prev => prev.map(s => s.id === tempId ? { ...s, name: shortLabel } : s));
+        setStops(prev => prev.map(s => s.id === tempId ? { ...s, name: label } : s));
       });
       return;
     }
@@ -587,18 +585,19 @@ export default function RouteBuilder() {
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Waypoint Stops ({stops.length})
                 </h3>
-                <button
-                  onClick={() => setShowAddStop(!showAddStop)}
-                  className={`flex items-center gap-1 text-xs font-semibold transition-colors rounded-lg px-2 py-1 ${
-                    showAddStop
-                      ? 'bg-primary text-white hover:bg-primary/90'
-                      : 'text-primary hover:text-primary/80 hover:bg-primary/5'
-                  }`}
-                >
-                  {showAddStop ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                  {showAddStop ? 'Done' : 'Add Stop'}
-                </button>
               </div>
+
+              <button
+                onClick={() => { setShowAddStop(!showAddStop); setMapClick(null); }}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${
+                  showAddStop
+                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                    : 'bg-primary text-white hover:bg-primary/90 shadow-primary/20'
+                }`}
+              >
+                {showAddStop ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
+              </button>
 
               {showAddStop && (
                 <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 space-y-2">
