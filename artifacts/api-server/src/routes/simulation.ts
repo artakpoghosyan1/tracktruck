@@ -33,8 +33,9 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     return;
   }
 
-  if (route.status !== "draft") {
-    res.status(400).json({ error: "bad_request", message: `Route cannot be activated from status: ${route.status}` });
+  const nonActivatableStatuses = ["in_progress"];
+  if (nonActivatableStatuses.includes(route.status)) {
+    res.status(400).json({ error: "bad_request", message: `Route cannot be activated while a simulation is running. Pause or reset it first.` });
     return;
   }
 
