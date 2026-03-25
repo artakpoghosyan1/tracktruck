@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ilike, desc, asc, isNull, sql, count } from "drizzle-orm";
 import { db, routesTable, routeStopsTable, shareLinksTable, paymentOrdersTable } from "@workspace/db";
+import { broadcastToToken, broadcastToRoute } from "./ws";
 import {
   ListRoutesQueryParams,
   CreateRouteBody,
@@ -299,6 +300,20 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     })
     .where(eq(routesTable.id, id))
     .returning();
+
+  // If route is live, notify all viewers that the route has changed so they refetch
+  if (["in_progress", "paused"].includes(updated.status)) {
+    const routeUpdatedMsg = { type: "route_updated", routeId: updated.id };
+    broadcastToRoute(updated.id, routeUpdatedMsg);
+    // Also broadcast to public share-link channels
+    const activeLinks = await db
+      .select()
+      .from(shareLinksTable)
+      .where(and(eq(shareLinksTable.routeId, updated.id), eq(shareLinksTable.active, true)));
+    for (const sl of activeLinks) {
+      broadcastToToken(sl.token, routeUpdatedMsg);
+    }
+  }
 
   res.json({
     id: updated.id,

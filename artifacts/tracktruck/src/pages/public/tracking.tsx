@@ -26,12 +26,16 @@ export default function PublicTracking() {
   const { mapboxToken } = useAppStore();
   const mapRef = useRef<MapRef>(null);
 
-  const { data: route, isLoading, isError } = useGetPublicTrack(token || "", {
+  const { data: route, isLoading, isError, refetch: refetchRoute } = useGetPublicTrack(token || "", {
     query: { queryKey: getGetPublicTrackQueryKey(token || ""), enabled: !!token, retry: false },
   });
 
   const [snapshot, setSnapshot] = useState<SnapshotData | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+
+  // Keep refetch in a ref so the WS effect doesn't need it as a dependency
+  const refetchRef = useRef(refetchRoute);
+  useEffect(() => { refetchRef.current = refetchRoute; }, [refetchRoute]);
 
   useEffect(() => {
     if (!token || isError) return;
@@ -47,7 +51,10 @@ export default function PublicTracking() {
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data.lat !== undefined || data.type === 'snapshot') {
+          if (data.type === 'route_updated') {
+            // Admin saved an updated route — reload so map shows the new polyline
+            refetchRef.current?.();
+          } else if (data.lat !== undefined || data.type === 'snapshot') {
             setSnapshot(data);
           }
         } catch { }
