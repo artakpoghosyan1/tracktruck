@@ -7,6 +7,7 @@ import {
   ArrowLeft, Save, Zap, Flag, GripVertical,
   Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
   MapPin, X, CheckCircle2, Loader2, Play, Pause, RotateCcw,
+  Pencil, AlertTriangle,
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -134,6 +135,10 @@ export default function RouteBuilder() {
   // Live truck position for in-progress routes
   const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedKmh: number } | null>(null);
 
+  // Route-change gate: when live, start/end are locked until admin explicitly unlocks
+  const [routeChangeMode, setRouteChangeMode] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -149,6 +154,10 @@ export default function RouteBuilder() {
   const { data: existingRoute, refetch: refetchRoute } = useGetRoute(routeId || 0, {
     query: { enabled: !!routeId },
   });
+
+  const isLiveRoute = ['in_progress', 'paused'].includes(existingRoute?.status ?? '');
+  const routeLocked = isLiveRoute && !routeChangeMode;
+
   const createMut = useCreateRoute();
   const updateMut = useUpdateRoute();
   const activateMut = useActivateRoute();
@@ -362,10 +371,13 @@ export default function RouteBuilder() {
   const showAddStopRef = useRef(showAddStop);
   showAddStopRef.current = showAddStop;
 
+  const routeLockedRef = useRef(routeLocked);
+  routeLockedRef.current = routeLocked;
+
   const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
     const { lng, lat } = e.lngLat;
     if (showAddStopRef.current) {
-      // Stop mode: instantly place a stop marker, geocode label in the background
+      // Stop mode: always allowed — instantly place a stop marker
       const tempId = `client-${Date.now()}`;
       setStops(prev => [...prev, { id: tempId, name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng, durationMinutes: 15 }]);
       reverseGeocode(lat, lng, mapboxToken).then(label => {
@@ -373,7 +385,8 @@ export default function RouteBuilder() {
       });
       return;
     }
-    // Normal mode: show popup for start/end placement
+    // Normal mode: blocked when route is locked (live and not in change-mode)
+    if (routeLockedRef.current) return;
     setMapClick({ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, loading: true });
     const label = await reverseGeocode(lat, lng, mapboxToken);
     setMapClick({ lng, lat, label, loading: false });
@@ -395,7 +408,7 @@ export default function RouteBuilder() {
     setMapClick(null);
   };
 
-  const handleSave = async (isActivate: boolean) => {
+  const handleSave = async (isActivate: boolean, noRedirect = false) => {
     if (!name.trim()) {
       toast({ title: "Route name required", description: "Please enter a name for this route.", variant: "destructive" });
       return;
@@ -439,11 +452,13 @@ export default function RouteBuilder() {
       if (isActivate) {
         await activateMut.mutateAsync({ id: savedRoute.id });
         toast({ title: "Route Activated!", description: "Your route is ready. Press Play on the dashboard to start tracking." });
+      } else if (noRedirect) {
+        toast({ title: "Route Updated", description: "The live route has been changed and the shared map is updating." });
       } else {
         toast({ title: "Draft Saved", description: `"${savedRoute.name}" saved successfully.` });
       }
       localStorage.removeItem('tracktruck_route_draft');
-      setLocation('/admin');
+      if (!noRedirect) setLocation('/admin');
     } catch (err: any) {
       const msg = err?.data?.message || err?.message || "Failed to save route";
       toast({ title: "Save failed", description: msg, variant: "destructive" });
@@ -532,20 +547,44 @@ export default function RouteBuilder() {
             </button>
           )}
 
-          <button
-            onClick={() => handleSave(false)}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
-          >
-            <Save className="w-4 h-4" /> Save Draft
-          </button>
-          <button
-            onClick={() => handleSave(true)}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-primary to-blue-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
-          >
-            <Zap className="w-4 h-4" /> Activate Route
-          </button>
+          {routeChangeMode && isLiveRoute ? (
+            /* In route-change mode: show Save Route Changes + Cancel */
+            <>
+              <button
+                onClick={() => setRouteChangeMode(false)}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                <X className="w-4 h-4" /> Cancel
+              </button>
+              <button
+                onClick={() => setShowConfirmModal(true)}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save Route Changes
+              </button>
+            </>
+          ) : !isLiveRoute ? (
+            /* Normal (non-live) route: show the standard Save Draft + Activate buttons */
+            <>
+              <button
+                onClick={() => handleSave(false)}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" /> Save Draft
+              </button>
+              <button
+                onClick={() => handleSave(true)}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-primary to-blue-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
+              >
+                <Zap className="w-4 h-4" /> Activate Route
+              </button>
+            </>
+          ) : null}
         </div>
       </header>
 
@@ -574,50 +613,100 @@ export default function RouteBuilder() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Route Points *</h3>
-                {mapboxToken && (
+                {mapboxToken && !routeLocked && (
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <MapPin className="w-3 h-3" /> Click map to place
                   </span>
                 )}
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-2">
-                  <div className="w-3.5 h-3.5 rounded-full bg-black border border-white ring-2 ring-black/20 shrink-0" />
-                  Start Location
-                </label>
-                <AddressSearch
-                  placeholder="Search city, address, or place..."
-                  mapboxToken={mapboxToken}
-                  value={start?.label}
-                  onSelect={(r) => setStart({ lng: r.lng, lat: r.lat, label: r.placeName })}
-                />
-                {start && (
-                  <p className="text-xs text-emerald-600 mt-1 pl-1 font-medium">
-                    ✓ {start.lat.toFixed(4)}, {start.lng.toFixed(4)}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-2">
-                  <div className="w-3.5 h-3.5 rounded-full bg-primary shrink-0 flex items-center justify-center">
-                    <Flag className="w-2 h-2 text-white" />
+              {/* Locked state: show current values with a Change Route button */}
+              {routeLocked ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 space-y-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-3 h-3 rounded-full bg-black border border-white ring-2 ring-black/20 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-muted-foreground">Start</p>
+                        <p className="text-sm font-medium text-foreground truncate">{start?.label ?? '—'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-3 h-3 rounded-full bg-primary shrink-0 flex items-center justify-center mt-0.5">
+                        <Flag className="w-1.5 h-1.5 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-muted-foreground">End</p>
+                        <p className="text-sm font-medium text-foreground truncate">{end?.label ?? '—'}</p>
+                      </div>
+                    </div>
                   </div>
-                  End Location (Destination)
-                </label>
-                <AddressSearch
-                  placeholder="Search destination city or address..."
-                  mapboxToken={mapboxToken}
-                  value={end?.label}
-                  onSelect={(r) => setEnd({ lng: r.lng, lat: r.lat, label: r.placeName })}
-                />
-                {end && (
-                  <p className="text-xs text-emerald-600 mt-1 pl-1 font-medium">
-                    ✓ {end.lat.toFixed(4)}, {end.lng.toFixed(4)}
-                  </p>
-                )}
-              </div>
+                  <button
+                    onClick={() => setRouteChangeMode(true)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Change Route
+                  </button>
+                </div>
+              ) : (
+                /* Editable state */
+                <>
+                  {isLiveRoute && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-700">Changing the start or end will reroute the live truck. Save to confirm.</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-black border border-white ring-2 ring-black/20 shrink-0" />
+                      Start Location
+                    </label>
+                    <AddressSearch
+                      placeholder="Search city, address, or place..."
+                      mapboxToken={mapboxToken}
+                      value={start?.label}
+                      onSelect={(r) => setStart({ lng: r.lng, lat: r.lat, label: r.placeName })}
+                    />
+                    {start && (
+                      <p className="text-xs text-emerald-600 mt-1 pl-1 font-medium">
+                        ✓ {start.lat.toFixed(4)}, {start.lng.toFixed(4)}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-primary shrink-0 flex items-center justify-center">
+                        <Flag className="w-2 h-2 text-white" />
+                      </div>
+                      End Location (Destination)
+                    </label>
+                    <AddressSearch
+                      placeholder="Search destination city or address..."
+                      mapboxToken={mapboxToken}
+                      value={end?.label}
+                      onSelect={(r) => setEnd({ lng: r.lng, lat: r.lat, label: r.placeName })}
+                    />
+                    {end && (
+                      <p className="text-xs text-emerald-600 mt-1 pl-1 font-medium">
+                        ✓ {end.lat.toFixed(4)}, {end.lng.toFixed(4)}
+                      </p>
+                    )}
+                  </div>
+
+                  {isLiveRoute && (
+                    <button
+                      onClick={() => { setRouteChangeMode(false); }}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border bg-muted hover:bg-muted/80 text-muted-foreground font-medium text-sm transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Cancel
+                    </button>
+                  )}
+                </>
+              )}
             </div>
 
             <hr className="border-border/50" />
@@ -969,6 +1058,48 @@ export default function RouteBuilder() {
           )}
         </main>
       </div>
+
+      {/* Confirmation modal for changing a live route */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowConfirmModal(false)} />
+          <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-foreground mb-1">Change the live route?</h2>
+                <p className="text-sm text-muted-foreground">
+                  This will immediately reroute the truck and update the shared tracking link for all viewers. The current truck position will be reset to the start of the new route.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                disabled={isSaving}
+                className="px-4 py-2 rounded-xl border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowConfirmModal(false);
+                  await handleSave(false, true);
+                  setRouteChangeMode(false);
+                  refetchRoute();
+                }}
+                disabled={isSaving}
+                className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                Yes, change route
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
