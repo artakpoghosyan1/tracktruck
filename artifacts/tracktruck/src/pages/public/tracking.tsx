@@ -284,13 +284,19 @@ export default function PublicTracking() {
               latitude={activeSnapshot.lat}
               anchor="center"
             >
-              <div className="relative">
-                <div className="absolute inset-0 bg-primary rounded-full animate-ping opacity-25 scale-150" />
+              <div className="relative flex items-center justify-center">
+                {/* Pulse ring */}
+                <div className="absolute w-14 h-14 rounded-full bg-primary/30 animate-ping" />
+                {/* Directional marker — points North (up) at bearing 0, rotates clockwise */}
                 <div
-                  className="w-11 h-11 bg-primary text-white rounded-full flex items-center justify-center shadow-xl border-2 border-white relative z-10 transition-transform"
-                  style={{ transform: `rotate(${activeSnapshot.bearing || 0}deg)` }}
+                  className="relative z-10 drop-shadow-xl transition-transform duration-300"
+                  style={{ transform: `rotate(${activeSnapshot.bearing ?? 0}deg)` }}
                 >
-                  <Truck className="w-5 h-5" />
+                  <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+                    <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5"/>
+                    {/* Arrow head pointing up = North = bearing 0° */}
+                    <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white"/>
+                  </svg>
                 </div>
               </div>
             </Marker>
