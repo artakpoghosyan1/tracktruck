@@ -94,6 +94,90 @@ function computeDistanceWithSpeedProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Geo & bearing helpers
+// ---------------------------------------------------------------------------
+
+/** Forward bearing in degrees from point A to point B (both [lng, lat]) */
+function computeBearingDeg(from: number[], to: number[]): number {
+  const lat1 = (from[1] * Math.PI) / 180;
+  const lat2 = (to[1] * Math.PI) / 180;
+  const dLng = ((to[0] - from[0]) * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/** Absolute angle between two bearings (0-180) */
+function bearingDiffDeg(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+/**
+ * Analyse the polyline to produce deterministic "virtual" traffic-light stops
+ * at sharp turns on urban road segments (speed < 80 km/h).
+ * Only stops AHEAD of `aheadOfDistM` are returned, so existing routes don't
+ * jump backwards when the engine first applies these events.
+ */
+function buildIntersectionStops(
+  polyline: number[][],
+  speedProfile: SpeedSegment[],
+  fallbackKmh: number,
+  aheadOfDistM: number,
+): StopEntry[] {
+  const stops: StopEntry[] = [];
+  let cumDist = 0;
+  let lastEventDist = -300; // enforce minimum spacing between events
+
+  for (let i = 1; i < polyline.length - 1; i++) {
+    const segDist = haversineM(polyline[i - 1][1], polyline[i - 1][0], polyline[i][1], polyline[i][0]);
+    cumDist += segDist;
+
+    // Skip past positions and segments that are too close together
+    if (cumDist <= aheadOfDistM) continue;
+    if (cumDist - lastEventDist < 150) continue;
+
+    // Skip highways
+    const localSpeed = speedAtDistanceM(speedProfile, cumDist, fallbackKmh);
+    if (localSpeed >= 80) continue;
+
+    const bearingIn = computeBearingDeg(polyline[i - 1], polyline[i]);
+    const bearingOut = computeBearingDeg(polyline[i], polyline[i + 1]);
+    const angle = bearingDiffDeg(bearingIn, bearingOut);
+    if (angle < 30) continue;
+
+    // Deterministic seed from position (same route → same stops every run)
+    const seed = Math.abs(Math.sin(cumDist * 0.007 + angle * 0.013));
+
+    let probability: number;
+    let minPauseS: number;
+    let maxPauseS: number;
+
+    if (angle >= 100) {
+      probability = 0.70; minPauseS = 20; maxPauseS = 55;
+    } else if (angle >= 70) {
+      probability = 0.45; minPauseS = 12; maxPauseS = 45;
+    } else if (angle >= 45) {
+      probability = 0.25; minPauseS = 5; maxPauseS = 20;
+    } else {
+      continue;
+    }
+
+    if (seed > probability) continue;
+
+    const pauseS = minPauseS + Math.round(seed * (maxPauseS - minPauseS));
+    stops.push({
+      distanceAlongPolylineM: cumDist,
+      durationS: pauseS,
+      name: '', // empty = virtual (traffic light — not shown in UI)
+    });
+    lastEventDist = cumDist;
+  }
+
+  return stops;
+}
+
+// ---------------------------------------------------------------------------
 // Geo helpers
 // ---------------------------------------------------------------------------
 
@@ -238,12 +322,22 @@ async function tick() {
       .where(eq(routeStopsTable.routeId, route.id))
       .orderBy(asc(routeStopsTable.sortOrder));
 
-    // Project each stop onto the polyline
-    const sortedStops: StopEntry[] = dbStops.map((s) => ({
+    // Project real (DB) stops onto the polyline
+    const realStops: StopEntry[] = dbStops.map((s) => ({
       distanceAlongPolylineM: distanceAlongPolylineToNearestVertex(polyline, s.lat, s.lng),
       durationS: s.durationMinutes * 60,
       name: s.name,
-    })).sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
+    }));
+
+    // Inject deterministic traffic-light stops at sharp turns on urban roads.
+    // Only inject stops AHEAD of the truck's last known position so that
+    // enabling this for an already-running route doesn't cause a backwards jump.
+    const traveledM = simState.distanceTraveledM ?? 0;
+    const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedKmh, traveledM);
+
+    // Merge and sort all stops by distance
+    const sortedStops: StopEntry[] = [...realStops, ...trafficStops]
+      .sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
 
     const pos = computePositionWithStops(
       totalElapsedS,
@@ -255,14 +349,18 @@ async function tick() {
 
     const baseSpeedKmh = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
 
+    // Whether the truck is stopped at any waypoint (real named stop OR virtual traffic light)
+    // pos.atStopName is undefined when traveling, '' for virtual stops, named string for real stops
+    const isAtAnyStop = pos.atStopName != null;
+
     // Smooth sinusoidal fluctuation for natural speed variation
     const fluctuation = Math.sin(totalElapsedS / 22) * 7 + Math.sin(totalElapsedS / 7) * 3;
-    const targetSpeedKmh = pos.atStopName ? 0 : Math.max(10, Math.round(baseSpeedKmh + fluctuation));
+    const targetSpeedKmh = isAtAnyStop ? 0 : Math.max(10, Math.round(baseSpeedKmh + fluctuation));
 
     // Ramp speed up gradually after each resume (wallElapsedMs resets to 0 on every resume)
     const RAMP_UP_S = 8;
     const wallElapsedS = wallElapsedMs / 1000;
-    const rampFactor = pos.atStopName ? 0 : Math.min(1.0, wallElapsedS / RAMP_UP_S);
+    const rampFactor = isAtAnyStop ? 0 : Math.min(1.0, wallElapsedS / RAMP_UP_S);
     const currentSpeedKmh = Math.round(targetSpeedKmh * rampFactor);
 
     // When stopped at a waypoint, offset the marker ~8 m to the right of the road
@@ -275,12 +373,15 @@ async function tick() {
       displayLng = edgeOffset.lng;
     }
 
+    // Virtual stops (traffic lights) have empty names — don't expose them to the UI
+    const visibleStopName = pos.atStopName || null; // '' → null so UI shows nothing
+
     const snapshot = {
       type: "snapshot",
       routeId: route.id,
       timestamp: new Date().toISOString(),
-      status: pos.completed ? "completed" : pos.atStopName ? "at_stop" : "in_progress",
-      atStopName: pos.atStopName ?? null,
+      status: pos.completed ? "completed" : isAtAnyStop ? "at_stop" : "in_progress",
+      atStopName: visibleStopName,
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent,
       lat: displayLat,

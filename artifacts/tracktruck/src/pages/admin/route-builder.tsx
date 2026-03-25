@@ -390,11 +390,20 @@ export default function RouteBuilder() {
     }
   };
 
-  const handleAddStop = (result: { placeName: string; lng: number; lat: number }) => {
-    setStops(prev => [...prev, {
-      id: `client-${Date.now()}`, name: result.placeName,
-      lat: result.lat, lng: result.lng, durationMinutes: 15,
-    }]);
+  const handleAddStop = async (result: { placeName: string; lng: number; lat: number }) => {
+    const tempId = `client-${Date.now()}`;
+    setStops(prev => {
+      const newStop: Stop = { id: tempId, name: result.placeName, lat: result.lat, lng: result.lng, durationMinutes: 15 };
+      if (isLiveRouteRef.current) {
+        const sortOrder = prev.length;
+        saveStopToDb(newStop, sortOrder).then(dbId => {
+          if (dbId != null) {
+            setStops(s => s.map(x => x.id === tempId ? { ...x, id: `db-${dbId}`, dbId } : x));
+          }
+        });
+      }
+      return [...prev, newStop];
+    });
     setShowAddStop(false);
   };
 
@@ -404,14 +413,88 @@ export default function RouteBuilder() {
   const routeLockedRef = useRef(routeLocked);
   routeLockedRef.current = routeLocked;
 
+  const isLiveRouteRef = useRef(isLiveRoute);
+  isLiveRouteRef.current = isLiveRoute;
+
+  const routeIdRef = useRef(routeId);
+  routeIdRef.current = routeId;
+
+  const stopsRef = useRef(stops);
+  stopsRef.current = stops;
+
+  /** Persist a new stop to the DB immediately (used during live rides) */
+  const saveStopToDb = useCallback(async (stop: { name: string; lat: number; lng: number; durationMinutes: number }, sortOrder: number): Promise<number | null> => {
+    const id = routeIdRef.current;
+    if (!id) return null;
+    try {
+      const res = await fetch(`/api/routes/${id}/stops`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+        },
+        body: JSON.stringify({ ...stop, sortOrder }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.id as number;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** Delete a stop from the DB (used during live rides) */
+  const deleteStopFromDb = useCallback(async (dbId: number) => {
+    const id = routeIdRef.current;
+    if (!id) return;
+    try {
+      await fetch(`/api/routes/${id}/stops/${dbId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+      });
+    } catch { /* silent */ }
+  }, []);
+
   const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
     const { lng, lat } = e.lngLat;
     if (showAddStopRef.current) {
       // Stop mode: always allowed — instantly place a stop marker
       const tempId = `client-${Date.now()}`;
-      setStops(prev => [...prev, { id: tempId, name: `${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng, durationMinutes: 15 }]);
-      reverseGeocode(lat, lng, mapboxToken).then(label => {
-        setStops(prev => prev.map(s => s.id === tempId ? { ...s, name: label } : s));
+      const placeholder = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+      // Optimistically add to state
+      setStops(prev => {
+        const newStop: Stop = { id: tempId, name: placeholder, lat, lng, durationMinutes: 15 };
+        return [...prev, newStop];
+      });
+
+      // Save to DB immediately when live, then reverse-geocode and update the name
+      // stopsRef.current already has the new stop appended above (React batches updates,
+      // but we read the PRE-append length here so sortOrder = prev.length)
+      const sortOrder = stopsRef.current.length; // will be 1 ahead after setStops runs, fine as sortOrder
+      const dbIdPromise: Promise<number | null> = isLiveRouteRef.current
+        ? saveStopToDb({ name: placeholder, lat, lng, durationMinutes: 15 }, sortOrder)
+        : Promise.resolve(null);
+
+      dbIdPromise.then(dbId => {
+        if (dbId != null) {
+          setStops(s => s.map(x => x.id === tempId ? { ...x, id: `db-${dbId}`, dbId } : x));
+        }
+      });
+
+      reverseGeocode(lat, lng, mapboxToken).then(async label => {
+        // Update name in state (match by tempId or by the db-prefixed id)
+        setStops(s => s.map(x => (x.id === tempId || x.lat === lat && x.lng === lng && x.name === placeholder) ? { ...x, name: label } : x));
+        // Also update name in DB if we have the dbId
+        const dbId = await dbIdPromise;
+        if (dbId != null && routeIdRef.current) {
+          setStops(s => s.map(x => x.id === `db-${dbId}` ? { ...x, name: label } : x));
+          fetch(`/api/routes/${routeIdRef.current}/stops/${dbId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+            body: JSON.stringify({ name: label }),
+          }).catch(() => {});
+        }
       });
       return;
     }
@@ -844,9 +927,29 @@ export default function RouteBuilder() {
                           key={stop.id}
                           stop={stop}
                           index={i}
-                          onRemove={(id) => setStops(s => s.filter(x => x.id !== id))}
+                          onRemove={(id) => {
+                            setStops(s => {
+                              const removing = s.find(x => x.id === id);
+                              if (isLiveRoute && removing?.dbId) {
+                                deleteStopFromDb(removing.dbId);
+                              }
+                              return s.filter(x => x.id !== id);
+                            });
+                          }}
                           onChangeName={(id, val) => setStops(s => s.map(x => x.id === id ? { ...x, name: val } : x))}
-                          onChangeDuration={(id, val) => setStops(s => s.map(x => x.id === id ? { ...x, durationMinutes: val } : x))}
+                          onChangeDuration={(id, val) => {
+                            setStops(s => s.map(x => {
+                              if (x.id !== id) return x;
+                              if (isLiveRoute && x.dbId && routeId) {
+                                fetch(`/api/routes/${routeId}/stops/${x.dbId}`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+                                  body: JSON.stringify({ durationMinutes: val }),
+                                }).catch(() => {});
+                              }
+                              return { ...x, durationMinutes: val };
+                            }));
+                          }}
                         />
                       ))}
                     </div>
