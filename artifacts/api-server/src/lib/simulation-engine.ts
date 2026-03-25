@@ -293,6 +293,15 @@ function computePositionWithStops(
 // Simulation tick
 // ---------------------------------------------------------------------------
 
+const COMPLETION_GRACE_S = 75; // seconds to linger at destination before marking unavailable
+
+/** routeId → Date.now() when pos.completed first became true (grace period start) */
+const completionGraceMap = new Map<number, number>();
+/** routeId → whether the truck was at ANY stop on the previous tick */
+const wasAtStopMap = new Map<number, boolean>();
+/** routeId → totalElapsedS when the truck last exited a stop (for per-stop ramp-up) */
+const lastStopExitSMap = new Map<number, number>();
+
 let tickCount = 0;
 
 async function tick() {
@@ -347,24 +356,96 @@ async function tick() {
       route.truckSpeedKmh,
     );
 
-    const baseSpeedKmh = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
+    // -----------------------------------------------------------------------
+    // Stop / traffic-light detection
+    // -----------------------------------------------------------------------
 
-    // Whether the truck is stopped at any waypoint (real named stop OR virtual traffic light)
-    // pos.atStopName is undefined when traveling, '' for virtual stops, named string for real stops
+    // pos.atStopName: undefined = traveling, '' = virtual (traffic light), 'name' = real stop
     const isAtAnyStop = pos.atStopName != null;
 
-    // Smooth sinusoidal fluctuation for natural speed variation
-    const fluctuation = Math.sin(totalElapsedS / 22) * 7 + Math.sin(totalElapsedS / 7) * 3;
-    const targetSpeedKmh = isAtAnyStop ? 0 : Math.max(10, Math.round(baseSpeedKmh + fluctuation));
+    // Track transitions in/out of stops for per-stop ramp-up
+    const wasAtStop = wasAtStopMap.get(route.id) ?? false;
+    if (!isAtAnyStop && wasAtStop) {
+      // Just left a stop — record the time so we can ramp speed back up
+      lastStopExitSMap.set(route.id, totalElapsedS);
+    }
+    wasAtStopMap.set(route.id, isAtAnyStop);
 
-    // Ramp speed up gradually after each resume (wallElapsedMs resets to 0 on every resume)
+    // -----------------------------------------------------------------------
+    // Completion grace period
+    // -----------------------------------------------------------------------
+
+    if (pos.completed) {
+      if (!completionGraceMap.has(route.id)) completionGraceMap.set(route.id, Date.now());
+    } else {
+      completionGraceMap.delete(route.id);
+    }
+
+    const graceStartMs = completionGraceMap.get(route.id);
+    const graceElapsedS = graceStartMs ? (Date.now() - graceStartMs) / 1000 : 0;
+    const inGracePeriod = pos.completed && graceElapsedS < COMPLETION_GRACE_S;
+    const trulyCompleted = pos.completed && graceElapsedS >= COMPLETION_GRACE_S;
+
+    // -----------------------------------------------------------------------
+    // Speed calculation
+    // -----------------------------------------------------------------------
+
     const RAMP_UP_S = 8;
+    const baseSpeedKmh = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
+
+    // --- Braking factor: decelerate when within 220 m of any upcoming stop or route end ---
+    const routeTotalDistM = route.distanceM > 0
+      ? route.distanceM
+      : polyline.reduce((acc: number, _pt: number[], i: number) =>
+          i === 0 ? 0 : acc + haversineM(polyline[i - 1][1], polyline[i - 1][0], polyline[i][1], polyline[i][0]), 0);
+
+    const nextStopAhead = sortedStops.find(s => s.distanceAlongPolylineM > pos.distanceTraveledM + 1);
+    const distToNextStopM = nextStopAhead
+      ? nextStopAhead.distanceAlongPolylineM - pos.distanceTraveledM
+      : Infinity;
+    const distToEndM = inGracePeriod ? 0 : Math.max(0, routeTotalDistM - pos.distanceTraveledM);
+    const closestEventM = Math.min(distToNextStopM, distToEndM);
+
+    const BRAKING_ZONE_M = 220;
+    const drivingBrakeFactor = closestEventM < BRAKING_ZONE_M
+      ? Math.max(0.05, closestEventM / BRAKING_ZONE_M)
+      : 1.0;
+
+    // Grace period: speed decays smoothly from road speed → 0 over COMPLETION_GRACE_S seconds
+    const graceBrakeFactor = inGracePeriod
+      ? Math.max(0, 1 - graceElapsedS / COMPLETION_GRACE_S)
+      : 1.0;
+
+    const combinedBrakeFactor = drivingBrakeFactor * graceBrakeFactor;
+
+    // --- Natural fluctuation: ±8% of road speed (multiplicative, never exceeds road limit) ---
+    const fluctMult = 1.0
+      + Math.sin(totalElapsedS / 22) * 0.08
+      + Math.sin(totalElapsedS / 7)  * 0.04
+      + Math.sin(totalElapsedS / 3)  * 0.02;
+
+    // --- Ramp-up after ANY stop (traffic light or real stop) ---
+    const lastStopExitS = lastStopExitSMap.get(route.id) ?? -Infinity;
+    const timeSinceStopExitS = isAtAnyStop ? 0 : totalElapsedS - lastStopExitS;
+    const stopRampFactor = timeSinceStopExitS < RAMP_UP_S ? timeSinceStopExitS / RAMP_UP_S : 1.0;
+
+    // --- Ramp-up after admin pause/resume (wallElapsedMs resets on each resume) ---
     const wallElapsedS = wallElapsedMs / 1000;
-    const rampFactor = isAtAnyStop ? 0 : Math.min(1.0, wallElapsedS / RAMP_UP_S);
+    const adminRampFactor = Math.min(1.0, wallElapsedS / RAMP_UP_S);
+
+    // Combined ramp: both stop-ramp and admin-ramp must complete for full speed
+    const rampFactor = isAtAnyStop ? 0 : Math.min(stopRampFactor, adminRampFactor);
+
+    // Final speed: base × fluctuation × braking × ramp
+    const targetSpeedKmh = isAtAnyStop
+      ? 0
+      : Math.max(0, baseSpeedKmh * fluctMult * combinedBrakeFactor);
     const currentSpeedKmh = Math.round(targetSpeedKmh * rampFactor);
 
-    // When stopped at a waypoint, offset the marker ~8 m to the right of the road
-    // so it appears to pull over to the edge rather than sitting on the centreline.
+    // -----------------------------------------------------------------------
+    // Display position (edge-offset for real named stops only)
+    // -----------------------------------------------------------------------
+
     let displayLat = pos.lat;
     let displayLng = pos.lng;
     if (pos.atStopName && pos.bearing != null) {
@@ -376,11 +457,20 @@ async function tick() {
     // Virtual stops (traffic lights) have empty names — don't expose them to the UI
     const visibleStopName = pos.atStopName || null; // '' → null so UI shows nothing
 
+    // -----------------------------------------------------------------------
+    // Build and broadcast snapshot
+    // -----------------------------------------------------------------------
+
     const snapshot = {
       type: "snapshot",
       routeId: route.id,
       timestamp: new Date().toISOString(),
-      status: pos.completed ? "completed" : isAtAnyStop ? "at_stop" : "in_progress",
+      // During grace period: keep broadcasting as "in_progress" so UI stays open
+      status: trulyCompleted
+        ? "completed"
+        : isAtAnyStop
+          ? "at_stop"
+          : "in_progress",
       atStopName: visibleStopName,
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent,
@@ -390,7 +480,6 @@ async function tick() {
       speedKmh: currentSpeedKmh,
     };
 
-    // Broadcast to all active share links for this route
     const shareLinks = await db
       .select()
       .from(shareLinksTable)
@@ -399,11 +488,18 @@ async function tick() {
     for (const sl of shareLinks) {
       broadcastToToken(sl.token, snapshot);
     }
-
-    // Also broadcast to any admin clients watching this route live
     broadcastToRoute(route.id, snapshot);
 
-    if (pos.completed) {
+    // -----------------------------------------------------------------------
+    // Completion handling
+    // -----------------------------------------------------------------------
+
+    if (trulyCompleted) {
+      // Clean up module-level maps
+      completionGraceMap.delete(route.id);
+      wasAtStopMap.delete(route.id);
+      lastStopExitSMap.delete(route.id);
+
       await db
         .update(routesTable)
         .set({ status: "completed", updatedAt: new Date() })
@@ -425,6 +521,7 @@ async function tick() {
       continue;
     }
 
+    // Periodic DB save (non-completion tick)
     if (tickCount % DB_SAVE_INTERVAL_TICKS === 0) {
       await db
         .update(simulationStatesTable)
