@@ -135,6 +135,36 @@ export default function RouteBuilder() {
   // Live truck position for in-progress routes
   const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedKmh: number } | null>(null);
 
+  // Smoothly interpolated marker position for the admin map view
+  const TICK_MS = 2000;
+  const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
+  const markerPosRef = useRef<{ lat: number; lng: number; bearing: number } | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (liveSnapshot?.lat == null || liveSnapshot?.lng == null) return;
+    const target = { lat: liveSnapshot.lat, lng: liveSnapshot.lng, bearing: liveSnapshot.bearing };
+    const from = markerPosRef.current ?? target;
+    const startTime = performance.now();
+    if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current);
+    const animate = (now: number) => {
+      const t = Math.min((now - startTime) / TICK_MS, 1);
+      let bdiff = target.bearing - from.bearing;
+      if (bdiff > 180) bdiff -= 360;
+      if (bdiff < -180) bdiff += 360;
+      const pos = {
+        lat: from.lat + (target.lat - from.lat) * t,
+        lng: from.lng + (target.lng - from.lng) * t,
+        bearing: from.bearing + bdiff * t,
+      };
+      markerPosRef.current = pos;
+      setMarkerPos({ ...pos });
+      if (t < 1) animFrameRef.current = requestAnimationFrame(animate);
+    };
+    animFrameRef.current = requestAnimationFrame(animate);
+    return () => { if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current); };
+  }, [liveSnapshot]);
+
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
   const [routeChangeMode, setRouteChangeMode] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -918,14 +948,14 @@ export default function RouteBuilder() {
                 </Marker>
               ))}
 
-              {/* Live truck marker (admin view, in_progress only) */}
-              {liveSnapshot && (
-                <Marker longitude={liveSnapshot.lng} latitude={liveSnapshot.lat} anchor="center">
+              {/* Live truck marker (admin view, in_progress only) — smoothly interpolated */}
+              {markerPos && (
+                <Marker longitude={markerPos.lng} latitude={markerPos.lat} anchor="center">
                   <div className="relative flex items-center justify-center">
                     <div className="absolute w-12 h-12 rounded-full bg-primary/25 animate-ping" />
                     <div
-                      className="relative z-10 drop-shadow-xl transition-transform duration-300"
-                      style={{ transform: `rotate(${liveSnapshot.bearing}deg)` }}
+                      className="relative z-10 drop-shadow-xl"
+                      style={{ transform: `rotate(${markerPos.bearing}deg)` }}
                     >
                       <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
                         <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5"/>

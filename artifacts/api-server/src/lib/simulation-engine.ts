@@ -94,6 +94,25 @@ function computeDistanceWithSpeedProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Geo helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a destination point given a start (lat/lng), a bearing (degrees),
+ * and a distance (metres).  Uses spherical Earth model (R = 6 371 000 m).
+ */
+function destinationPoint(lat: number, lng: number, bearingDeg: number, distanceM: number): { lat: number; lng: number } {
+  const R = 6_371_000;
+  const φ1 = (lat * Math.PI) / 180;
+  const λ1 = (lng * Math.PI) / 180;
+  const θ = (bearingDeg * Math.PI) / 180;
+  const δ = distanceM / R;
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+  return { lat: (φ2 * 180) / Math.PI, lng: (λ2 * 180) / Math.PI };
+}
+
+// ---------------------------------------------------------------------------
 // Stop projection
 // ---------------------------------------------------------------------------
 
@@ -235,11 +254,26 @@ async function tick() {
     );
 
     const baseSpeedKmh = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
-    // Add smooth sinusoidal fluctuation so speed feels natural rather than constant
+
+    // Smooth sinusoidal fluctuation for natural speed variation
     const fluctuation = Math.sin(totalElapsedS / 22) * 7 + Math.sin(totalElapsedS / 7) * 3;
-    const currentSpeedKmh = pos.atStopName
-      ? 0
-      : Math.max(10, Math.round(baseSpeedKmh + fluctuation));
+    const targetSpeedKmh = pos.atStopName ? 0 : Math.max(10, Math.round(baseSpeedKmh + fluctuation));
+
+    // Ramp speed up gradually after each resume (wallElapsedMs resets to 0 on every resume)
+    const RAMP_UP_S = 8;
+    const wallElapsedS = wallElapsedMs / 1000;
+    const rampFactor = pos.atStopName ? 0 : Math.min(1.0, wallElapsedS / RAMP_UP_S);
+    const currentSpeedKmh = Math.round(targetSpeedKmh * rampFactor);
+
+    // When stopped at a waypoint, offset the marker ~8 m to the right of the road
+    // so it appears to pull over to the edge rather than sitting on the centreline.
+    let displayLat = pos.lat;
+    let displayLng = pos.lng;
+    if (pos.atStopName && pos.bearing != null) {
+      const edgeOffset = destinationPoint(pos.lat, pos.lng, (pos.bearing + 90) % 360, 8);
+      displayLat = edgeOffset.lat;
+      displayLng = edgeOffset.lng;
+    }
 
     const snapshot = {
       type: "snapshot",
@@ -249,8 +283,8 @@ async function tick() {
       atStopName: pos.atStopName ?? null,
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent,
-      lat: pos.lat,
-      lng: pos.lng,
+      lat: displayLat,
+      lng: displayLng,
       bearing: pos.bearing,
       speedKmh: currentSpeedKmh,
     };

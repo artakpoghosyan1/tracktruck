@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "wouter";
 import Map, { Marker, MapRef } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
@@ -32,6 +32,44 @@ export default function PublicTracking() {
 
   const [snapshot, setSnapshot] = useState<SnapshotData | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+
+  // Smoothly interpolated marker position — animates from previous to new
+  // position over one server-tick interval so the truck glides continuously.
+  const TICK_MS = 2000;
+  const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
+  const markerPosRef = useRef<{ lat: number; lng: number; bearing: number } | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  const lerpBearing = useCallback((from: number, to: number, t: number) => {
+    let diff = to - from;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    return from + diff * t;
+  }, []);
+
+  useEffect(() => {
+    if (snapshot?.lat == null || snapshot?.lng == null) return;
+    const target = { lat: snapshot.lat, lng: snapshot.lng, bearing: snapshot.bearing ?? 0 };
+    const from = markerPosRef.current ?? target;
+    const startTime = performance.now();
+
+    if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current);
+
+    const animate = (now: number) => {
+      const t = Math.min((now - startTime) / TICK_MS, 1);
+      const pos = {
+        lat: from.lat + (target.lat - from.lat) * t,
+        lng: from.lng + (target.lng - from.lng) * t,
+        bearing: lerpBearing(from.bearing, target.bearing, t),
+      };
+      markerPosRef.current = pos;
+      setMarkerPos({ ...pos });
+      if (t < 1) animFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animFrameRef.current = requestAnimationFrame(animate);
+    return () => { if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current); };
+  }, [snapshot, lerpBearing]);
 
   // Keep refetch in a ref so the WS effect doesn't need it as a dependency
   const refetchRef = useRef(refetchRoute);
@@ -258,24 +296,17 @@ export default function PublicTracking() {
           initialViewState={{ longitude: route.startLng, latitude: route.startLat, zoom: 6 }}
           mapStyle="mapbox://styles/mapbox/streets-v12"
         >
-          {/* Live Truck */}
-          {activeSnapshot?.lat != null && activeSnapshot?.lng != null && (
-            <Marker
-              longitude={activeSnapshot.lng}
-              latitude={activeSnapshot.lat}
-              anchor="center"
-            >
+          {/* Live Truck — position updated via smooth rAF interpolation */}
+          {markerPos && (
+            <Marker longitude={markerPos.lng} latitude={markerPos.lat} anchor="center">
               <div className="relative flex items-center justify-center">
-                {/* Pulse ring */}
                 <div className="absolute w-14 h-14 rounded-full bg-primary/30 animate-ping" />
-                {/* Directional marker — points North (up) at bearing 0, rotates clockwise */}
                 <div
-                  className="relative z-10 drop-shadow-xl transition-transform duration-300"
-                  style={{ transform: `rotate(${activeSnapshot.bearing ?? 0}deg)` }}
+                  className="relative z-10 drop-shadow-xl"
+                  style={{ transform: `rotate(${markerPos.bearing}deg)` }}
                 >
                   <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
                     <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5"/>
-                    {/* Arrow head pointing up = North = bearing 0° */}
                     <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white"/>
                   </svg>
                 </div>
