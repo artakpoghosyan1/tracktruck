@@ -17,6 +17,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
+    "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.3",
     "ws": "^8.19.0"
   },

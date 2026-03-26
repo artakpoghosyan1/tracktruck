@@ -1,18 +1,52 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import { OAuth2Client } from "google-auth-library";
+import { db, usersTable, oauthAccountsTable, refreshTokensTable } from "@workspace/db";
 import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
-import { signAccessToken, signRefreshToken, verifyToken } from "../lib/jwt";
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyToken,
+  hashToken,
+  REFRESH_TOKEN_TTL_MS,
+} from "../lib/jwt";
 
 const router: IRouter = Router();
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function userPayload(user: { id: number; email: string; name: string; emailVerified: boolean; createdAt: Date }) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    emailVerified: user.emailVerified,
+    createdAt: user.createdAt.toISOString(),
+  };
+}
+
+async function issueTokenPair(userId: number, email: string) {
+  const accessToken = signAccessToken(userId, email);
+  const refreshToken = signRefreshToken(userId, email);
+
+  await db.insert(refreshTokensTable).values({
+    userId,
+    tokenHash: hashToken(refreshToken),
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+  });
+
+  return { accessToken, refreshToken };
+}
+
+// ─── routes ─────────────────────────────────────────────────────────────────
 
 router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res) => {
   const { email, password, name } = req.body as { email: string; password: string; name: string };
 
-  const existing = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  const existing = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email)).limit(1);
   if (existing.length > 0) {
     res.status(409).json({ error: "conflict", message: "An account with this email already exists" });
     return;
@@ -21,20 +55,9 @@ router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res)
   const passwordHash = await bcrypt.hash(password, 10);
   const [user] = await db.insert(usersTable).values({ email, passwordHash, name, emailVerified: false }).returning();
 
-  const accessToken = signAccessToken(user.id, user.email);
-  const refreshToken = signRefreshToken(user.id, user.email);
+  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
 
-  res.status(201).json({
-    accessToken,
-    refreshToken,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      emailVerified: user.emailVerified,
-      createdAt: user.createdAt.toISOString(),
-    },
-  });
+  res.status(201).json({ accessToken, refreshToken, user: userPayload(user) });
 });
 
 router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) => {
@@ -52,24 +75,77 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
     return;
   }
 
-  const accessToken = signAccessToken(user.id, user.email);
-  const refreshToken = signRefreshToken(user.id, user.email);
+  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
 
-  res.json({
-    accessToken,
-    refreshToken,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      emailVerified: user.emailVerified,
-      createdAt: user.createdAt.toISOString(),
-    },
-  });
+  res.json({ accessToken, refreshToken, user: userPayload(user) });
 });
 
 router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Google OAuth not yet configured — supply GOOGLE_CLIENT_ID to enable" });
+  const googleClientId = process.env["GOOGLE_CLIENT_ID"];
+  if (!googleClientId) {
+    res.status(503).json({
+      error: "service_unavailable",
+      message: "Google OAuth is not configured. Set the GOOGLE_CLIENT_ID environment variable to enable it.",
+    });
+    return;
+  }
+
+  const { idToken } = req.body as { idToken: string };
+
+  let googleEmail: string | undefined;
+  let googleName: string | undefined;
+  let googleUserId: string | undefined;
+
+  try {
+    const client = new OAuth2Client(googleClientId);
+    const ticket = await client.verifyIdToken({ idToken, audience: googleClientId });
+    const payload = ticket.getPayload();
+    if (!payload) throw new Error("Empty Google token payload");
+    googleEmail = payload["email"];
+    googleName = payload["name"] ?? payload["email"];
+    googleUserId = payload["sub"];
+  } catch {
+    res.status(401).json({ error: "unauthorized", message: "Invalid Google ID token" });
+    return;
+  }
+
+  if (!googleEmail || !googleUserId) {
+    res.status(401).json({ error: "unauthorized", message: "Google token missing required fields" });
+    return;
+  }
+
+  // Upsert user
+  let [user] = await db.select().from(usersTable).where(eq(usersTable.email, googleEmail)).limit(1);
+  if (!user) {
+    [user] = await db
+      .insert(usersTable)
+      .values({ email: googleEmail, name: googleName!, emailVerified: true })
+      .returning();
+  }
+
+  // Upsert oauth_accounts row
+  const [existingOAuth] = await db
+    .select({ id: oauthAccountsTable.id })
+    .from(oauthAccountsTable)
+    .where(
+      and(
+        eq(oauthAccountsTable.provider, "google"),
+        eq(oauthAccountsTable.providerUserId, googleUserId),
+      ),
+    )
+    .limit(1);
+
+  if (!existingOAuth) {
+    await db.insert(oauthAccountsTable).values({
+      userId: user.id,
+      provider: "google",
+      providerUserId: googleUserId,
+    });
+  }
+
+  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
+
+  res.json({ accessToken, refreshToken, user: userPayload(user) });
 });
 
 router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, res) => {
@@ -88,29 +164,47 @@ router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, re
     return;
   }
 
+  // Verify token exists in DB and is not revoked
+  const tokenHash = hashToken(refreshToken);
+  const [stored] = await db
+    .select()
+    .from(refreshTokensTable)
+    .where(and(eq(refreshTokensTable.tokenHash, tokenHash), eq(refreshTokensTable.revoked, false)))
+    .limit(1);
+
+  if (!stored) {
+    res.status(401).json({ error: "unauthorized", message: "Refresh token has been revoked or does not exist" });
+    return;
+  }
+
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.sub)).limit(1);
   if (!user) {
     res.status(401).json({ error: "unauthorized", message: "User not found" });
     return;
   }
 
-  const newAccessToken = signAccessToken(user.id, user.email);
-  const newRefreshToken = signRefreshToken(user.id, user.email);
+  // Rotate: revoke old token, issue new pair
+  await db
+    .update(refreshTokensTable)
+    .set({ revoked: true })
+    .where(eq(refreshTokensTable.id, stored.id));
 
-  res.json({
-    accessToken: newAccessToken,
-    refreshToken: newRefreshToken,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      emailVerified: user.emailVerified,
-      createdAt: user.createdAt.toISOString(),
-    },
-  });
+  const { accessToken: newAccessToken, refreshToken: newRefreshToken } = await issueTokenPair(user.id, user.email);
+
+  res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken, user: userPayload(user) });
 });
 
-router.post("/auth/logout", (req, res) => {
+router.post("/auth/logout", requireAuth(), async (req, res) => {
+  const authHeader = req.headers["authorization"];
+  // The access token is validated by requireAuth; also revoke the refresh token if provided
+  const body = req.body as { refreshToken?: string };
+  if (body.refreshToken) {
+    const tokenHash = hashToken(body.refreshToken);
+    await db
+      .update(refreshTokensTable)
+      .set({ revoked: true })
+      .where(eq(refreshTokensTable.tokenHash, tokenHash));
+  }
   res.json({ message: "Logged out successfully" });
 });
 
@@ -121,13 +215,7 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
     res.status(404).json({ error: "not_found", message: "User not found" });
     return;
   }
-  res.json({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    emailVerified: user.emailVerified,
-    createdAt: user.createdAt.toISOString(),
-  });
+  res.json(userPayload(user));
 });
 
 // Stub: password reset — email sending not yet implemented
