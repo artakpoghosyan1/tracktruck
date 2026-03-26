@@ -95,6 +95,7 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
   let googleEmail: string | undefined;
   let googleName: string | undefined;
   let googleUserId: string | undefined;
+  let googleEmailVerified = false;
 
   try {
     const client = new OAuth2Client(googleClientId);
@@ -104,6 +105,7 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     googleEmail = payload["email"];
     googleName = payload["name"] ?? payload["email"];
     googleUserId = payload["sub"];
+    googleEmailVerified = payload["email_verified"] === true;
   } catch {
     res.status(401).json({ error: "unauthorized", message: "Invalid Google ID token" });
     return;
@@ -137,7 +139,12 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     }
     user = linked;
   } else {
-    // New Google login — find or create user by email, then link the oauth account
+    // New Google login — find or create user by email, then link the oauth account.
+    // Only link by email when Google has verified the address (prevents account takeover).
+    if (!googleEmailVerified) {
+      res.status(401).json({ error: "unauthorized", message: "Google account email is not verified" });
+      return;
+    }
     const [byEmail] = await db.select().from(usersTable).where(eq(usersTable.email, googleEmail)).limit(1);
     if (byEmail) {
       user = byEmail;
@@ -147,12 +154,12 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
         .values({ email: googleEmail, name: googleName!, emailVerified: true })
         .returning();
     }
-    // Link oauth account (unique index prevents duplicates under race conditions)
+    // Race-safe: onConflictDoNothing handles concurrent duplicate inserts gracefully
     await db.insert(oauthAccountsTable).values({
       userId: user.id,
       provider: "google",
       providerUserId: googleUserId,
-    });
+    }).onConflictDoNothing();
   }
 
   const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
