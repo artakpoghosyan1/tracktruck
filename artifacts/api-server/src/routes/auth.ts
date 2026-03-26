@@ -130,4 +130,20 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
   });
 });
 
+// Stub: password reset — email sending not yet implemented
+router.post("/auth/forgot-password", async (req, res) => {
+  res.status(501).json({
+    error: "not_implemented",
+    message: "Password reset emails are not yet configured. Please contact support.",
+  });
+});
+
+// Stub: email verification — token validation not yet implemented
+router.post("/auth/verify-email", async (req, res) => {
+  res.status(501).json({
+    error: "not_implemented",
+    message: "Email verification is not yet configured.",
+  });
+});
+
 export default router;
