@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
-import { AuthSignupBody, AuthLoginBody, AuthRefreshBody } from "@workspace/api-zod";
+import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
 import { signAccessToken, signRefreshToken, verifyToken } from "../lib/jwt";
@@ -68,8 +68,8 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
   });
 });
 
-router.post("/auth/google", async (req, res) => {
-  res.status(501).json({ error: "not_implemented", message: "Google OAuth not yet configured" });
+router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res) => {
+  res.status(501).json({ error: "not_implemented", message: "Google OAuth not yet configured — supply GOOGLE_CLIENT_ID to enable" });
 });
 
 router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, res) => {
