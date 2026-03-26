@@ -103,9 +103,12 @@ router.post("/payments/callback", validate({ body: PaymentCallbackBody }), async
       res.status(401).json({ error: "unauthorized", message: "Missing X-Webhook-Signature header" });
       return;
     }
+    // Use raw body bytes captured before JSON parsing to match the exact bytes the
+    // gateway signed. JSON.stringify may produce different whitespace/key order.
+    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body), "utf8");
     const expected = crypto
       .createHmac("sha256", webhookSecret)
-      .update(JSON.stringify(req.body))
+      .update(rawBody)
       .digest("hex");
     const signatureBuffer = Buffer.from(signature, "hex");
     const expectedBuffer = Buffer.from(expected, "hex");
