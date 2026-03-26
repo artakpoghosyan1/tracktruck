@@ -14,8 +14,11 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(authRouter);
 router.use(publicRouter);
-router.use(simulationRouter);
+// paymentsRouter must come before simulationRouter and routesRouter,
+// because those routers apply requireAuth() globally and would intercept
+// the unauthenticated /payments/callback webhook before it is handled here.
 router.use(paymentsRouter);
+router.use(simulationRouter);
 router.use(routesRouter);
 
 export default router;

@@ -87,6 +87,37 @@ router.post("/payments/create", requireAuth(), validate({ body: CreatePaymentBod
 });
 
 router.post("/payments/callback", validate({ body: PaymentCallbackBody }), async (req, res) => {
+  // Verify webhook authenticity via HMAC-SHA256 signature.
+  // The payment gateway must sign the raw JSON body with the shared PAYMENT_WEBHOOK_SECRET.
+  const webhookSecret = process.env["PAYMENT_WEBHOOK_SECRET"];
+  if (!webhookSecret) {
+    // In dev/test, allow without signature only if explicitly opted out.
+    // In any real environment this must be set.
+    if (process.env["NODE_ENV"] !== "development") {
+      res.status(503).json({ error: "service_unavailable", message: "Webhook secret not configured" });
+      return;
+    }
+  } else {
+    const signature = req.headers["x-webhook-signature"];
+    if (!signature || typeof signature !== "string") {
+      res.status(401).json({ error: "unauthorized", message: "Missing X-Webhook-Signature header" });
+      return;
+    }
+    const expected = crypto
+      .createHmac("sha256", webhookSecret)
+      .update(JSON.stringify(req.body))
+      .digest("hex");
+    const signatureBuffer = Buffer.from(signature, "hex");
+    const expectedBuffer = Buffer.from(expected, "hex");
+    if (
+      signatureBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+    ) {
+      res.status(401).json({ error: "unauthorized", message: "Invalid webhook signature" });
+      return;
+    }
+  }
+
   const { paymentReference, transactionId, status } = req.body as {
     paymentReference: string;
     transactionId: string;
