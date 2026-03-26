@@ -195,16 +195,24 @@ router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, re
 });
 
 router.post("/auth/logout", requireAuth(), async (req, res) => {
-  const authHeader = req.headers["authorization"];
-  // The access token is validated by requireAuth; also revoke the refresh token if provided
-  const body = req.body as { refreshToken?: string };
+  const authReq = req as AuthRequest;
+  const body = (req.body ?? {}) as { refreshToken?: string };
+
   if (body.refreshToken) {
+    // Revoke the specific refresh token provided
     const tokenHash = hashToken(body.refreshToken);
     await db
       .update(refreshTokensTable)
       .set({ revoked: true })
-      .where(eq(refreshTokensTable.tokenHash, tokenHash));
+      .where(and(eq(refreshTokensTable.tokenHash, tokenHash), eq(refreshTokensTable.userId, authReq.user.id)));
+  } else {
+    // No specific token — revoke all active refresh tokens for this user (full session invalidation)
+    await db
+      .update(refreshTokensTable)
+      .set({ revoked: true })
+      .where(and(eq(refreshTokensTable.userId, authReq.user.id), eq(refreshTokensTable.revoked, false)));
   }
+
   res.json({ message: "Logged out successfully" });
 });
 

@@ -1,8 +1,16 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { verifyToken } from "../lib/jwt";
 
+export interface AuthUser {
+  id: number;
+  email: string;
+}
+
 export interface AuthRequest extends Request {
+  user: AuthUser;
+  /** @deprecated use req.user.id */
   userId: number;
+  /** @deprecated use req.user.email */
   userEmail: string;
 }
 
@@ -21,8 +29,11 @@ export function requireAuth(): RequestHandler {
         res.status(401).json({ error: "unauthorized", message: "Invalid token type" });
         return;
       }
-      (req as AuthRequest).userId = payload.sub;
-      (req as AuthRequest).userEmail = payload.email;
+      const authReq = req as AuthRequest;
+      authReq.user = { id: payload.sub, email: payload.email };
+      // Keep legacy aliases so existing route handlers continue to work
+      authReq.userId = payload.sub;
+      authReq.userEmail = payload.email;
       next();
     } catch {
       res.status(401).json({ error: "unauthorized", message: "Invalid or expired token" });
