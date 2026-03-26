@@ -18,6 +18,14 @@ export interface MessageResponse {
   message: string;
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface VerifyEmailRequest {
+  token: string;
+}
+
 export interface SignupRequest {
   email: string;
   /** @minLength 8 */

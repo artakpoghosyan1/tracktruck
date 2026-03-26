@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq, and } from "drizzle-orm";
+import { eq, and, gt } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import { db, usersTable, oauthAccountsTable, refreshTokensTable } from "@workspace/db";
 import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody } from "@workspace/api-zod";
@@ -164,16 +164,22 @@ router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, re
     return;
   }
 
-  // Verify token exists in DB and is not revoked
+  // Verify token exists in DB, is not revoked, and has not expired at DB level
   const tokenHash = hashToken(refreshToken);
   const [stored] = await db
     .select()
     .from(refreshTokensTable)
-    .where(and(eq(refreshTokensTable.tokenHash, tokenHash), eq(refreshTokensTable.revoked, false)))
+    .where(
+      and(
+        eq(refreshTokensTable.tokenHash, tokenHash),
+        eq(refreshTokensTable.revoked, false),
+        gt(refreshTokensTable.expiresAt, new Date()),
+      ),
+    )
     .limit(1);
 
   if (!stored) {
-    res.status(401).json({ error: "unauthorized", message: "Refresh token has been revoked or does not exist" });
+    res.status(401).json({ error: "unauthorized", message: "Refresh token has been revoked, expired, or does not exist" });
     return;
   }
 
