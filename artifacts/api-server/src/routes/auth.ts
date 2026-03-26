@@ -114,18 +114,10 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     return;
   }
 
-  // Upsert user
-  let [user] = await db.select().from(usersTable).where(eq(usersTable.email, googleEmail)).limit(1);
-  if (!user) {
-    [user] = await db
-      .insert(usersTable)
-      .values({ email: googleEmail, name: googleName!, emailVerified: true })
-      .returning();
-  }
-
-  // Upsert oauth_accounts row
+  // Resolve identity: provider ID is the canonical key to avoid identity drift if email changes.
+  // 1. Look for an existing oauth_accounts row linking this Google account.
   const [existingOAuth] = await db
-    .select({ id: oauthAccountsTable.id })
+    .select()
     .from(oauthAccountsTable)
     .where(
       and(
@@ -135,7 +127,27 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     )
     .limit(1);
 
-  if (!existingOAuth) {
+  let user;
+  if (existingOAuth) {
+    // Known Google account — load the linked local user
+    const [linked] = await db.select().from(usersTable).where(eq(usersTable.id, existingOAuth.userId)).limit(1);
+    if (!linked) {
+      res.status(500).json({ error: "internal_error", message: "Linked user account not found" });
+      return;
+    }
+    user = linked;
+  } else {
+    // New Google login — find or create user by email, then link the oauth account
+    const [byEmail] = await db.select().from(usersTable).where(eq(usersTable.email, googleEmail)).limit(1);
+    if (byEmail) {
+      user = byEmail;
+    } else {
+      [user] = await db
+        .insert(usersTable)
+        .values({ email: googleEmail, name: googleName!, emailVerified: true })
+        .returning();
+    }
+    // Link oauth account (unique index prevents duplicates under race conditions)
     await db.insert(oauthAccountsTable).values({
       userId: user.id,
       provider: "google",
