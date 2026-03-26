@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { eq, and, gt } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import { db, usersTable, oauthAccountsTable, refreshTokensTable } from "@workspace/db";
-import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody } from "@workspace/api-zod";
+import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody, AuthForgotPasswordBody, AuthVerifyEmailBody } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
 import {
@@ -233,7 +233,7 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
 });
 
 // Stub: password reset — email sending not yet implemented
-router.post("/auth/forgot-password", async (req, res) => {
+router.post("/auth/forgot-password", validate({ body: AuthForgotPasswordBody }), async (req, res) => {
   res.status(501).json({
     error: "not_implemented",
     message: "Password reset emails are not yet configured. Please contact support.",
@@ -241,7 +241,7 @@ router.post("/auth/forgot-password", async (req, res) => {
 });
 
 // Stub: email verification — token validation not yet implemented
-router.post("/auth/verify-email", async (req, res) => {
+router.post("/auth/verify-email", validate({ body: AuthVerifyEmailBody }), async (req, res) => {
   res.status(501).json({
     error: "not_implemented",
     message: "Email verification is not yet configured.",
