@@ -157,7 +157,7 @@ router.post("/payments/callback", validate({ body: PaymentCallbackBody }), async
 });
 
 router.get("/payments/:id", requireAuth(), validate({ params: GetPaymentParams }), async (req, res) => {
-  const id = parseInt(req.params["id"]!);
+  const id = parseInt(req.params["id"] as string);
   const authReq = req as AuthRequest;
 
   const [payment] = await db

@@ -397,7 +397,7 @@ async function tick() {
     const routeTotalDistM = route.distanceM > 0
       ? route.distanceM
       : polyline.reduce((acc: number, _pt: number[], i: number) =>
-          i === 0 ? 0 : acc + haversineM(polyline[i - 1][1], polyline[i - 1][0], polyline[i][1], polyline[i][0]), 0);
+        i === 0 ? 0 : acc + haversineM(polyline[i - 1][1], polyline[i - 1][0], polyline[i][1], polyline[i][0]), 0);
 
     const nextStopAhead = sortedStops.find(s => s.distanceAlongPolylineM > pos.distanceTraveledM + 1);
     const distToNextStopM = nextStopAhead
@@ -407,9 +407,11 @@ async function tick() {
     const closestEventM = Math.min(distToNextStopM, distToEndM);
 
     const BRAKING_ZONE_M = 220;
-    const drivingBrakeFactor = closestEventM < BRAKING_ZONE_M
-      ? Math.max(0.05, closestEventM / BRAKING_ZONE_M)
-      : 1.0;
+    const drivingBrakeFactor = inGracePeriod
+      ? 0  // grace period: let graceBrakeFactor fully control speed decay to 0
+      : closestEventM < BRAKING_ZONE_M
+        ? Math.max(0.05, closestEventM / BRAKING_ZONE_M)
+        : 1.0;
 
     // Grace period: speed decays smoothly from road speed → 0 over COMPLETION_GRACE_S seconds
     const graceBrakeFactor = inGracePeriod
@@ -421,8 +423,8 @@ async function tick() {
     // --- Natural fluctuation: ±8% of road speed (multiplicative, never exceeds road limit) ---
     const fluctMult = 1.0
       + Math.sin(totalElapsedS / 22) * 0.08
-      + Math.sin(totalElapsedS / 7)  * 0.04
-      + Math.sin(totalElapsedS / 3)  * 0.02;
+      + Math.sin(totalElapsedS / 7) * 0.04
+      + Math.sin(totalElapsedS / 3) * 0.02;
 
     // --- Ramp-up after ANY stop (traffic light or real stop) ---
     const lastStopExitS = lastStopExitSMap.get(route.id) ?? -Infinity;
@@ -436,10 +438,10 @@ async function tick() {
     // Combined ramp: both stop-ramp and admin-ramp must complete for full speed
     const rampFactor = isAtAnyStop ? 0 : Math.min(stopRampFactor, adminRampFactor);
 
-    // Final speed: base × fluctuation × braking × ramp
+    const MAX_ALLOWED_SPEED_KMH = 120;
     const targetSpeedKmh = isAtAnyStop
       ? 0
-      : Math.max(0, baseSpeedKmh * fluctMult * combinedBrakeFactor);
+      : Math.min(MAX_ALLOWED_SPEED_KMH, Math.max(0, baseSpeedKmh * fluctMult * combinedBrakeFactor));
     const currentSpeedKmh = Math.round(targetSpeedKmh * rampFactor);
 
     // -----------------------------------------------------------------------

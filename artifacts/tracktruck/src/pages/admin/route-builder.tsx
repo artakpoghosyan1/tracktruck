@@ -6,8 +6,8 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, Zap, Flag, GripVertical,
   Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
-  MapPin, X, CheckCircle2, Loader2, Play, Pause, RotateCcw,
-  Pencil, AlertTriangle,
+  MapPin, X, CheckCircle2, Loader2, Play, Pause,
+  Pencil, AlertTriangle, Gauge, Copy, Check, RotateCcw
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -69,48 +69,61 @@ function routeLabel(idx: number, option: RouteOption, allOptions: RouteOption[])
   return `Alternative ${idx}`;
 }
 
-function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration }: {
+function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, atStopName, countdownSec }: {
   stop: Stop; index: number;
   onRemove: (id: string) => void;
   onChangeName: (id: string, val: string) => void;
   onChangeDuration: (id: string, val: number) => void;
+  atStopName: string | null;
+  countdownSec: number | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
-    <div ref={setNodeRef} style={style} className="flex gap-2 items-center bg-muted/40 border border-border/60 rounded-xl p-3 group">
-      <div {...attributes} {...listeners} className="cursor-grab p-1 text-muted-foreground hover:text-foreground shrink-0">
-        <GripVertical className="w-4 h-4" />
-      </div>
-      <div className="w-6 h-6 rounded-full bg-white border-2 border-primary flex items-center justify-center text-primary font-bold text-xs shrink-0">
-        {index + 1}
-      </div>
-      <div className="flex-1 min-w-0 space-y-1">
-        <input
-          type="text"
-          value={stop.name}
-          onChange={(e) => onChangeName(stop.id, e.target.value)}
-          className="w-full bg-transparent font-medium outline-none text-sm placeholder:text-muted-foreground truncate"
-          placeholder="Stop name"
-        />
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock className="w-3 h-3 shrink-0" />
-          <input
-            type="number"
-            value={stop.durationMinutes}
-            onChange={(e) => onChangeDuration(stop.id, Number(e.target.value))}
-            className="w-10 bg-transparent outline-none border-b border-dashed border-muted-foreground/40 text-center"
-            min={1}
-          />
-          <span>min stop</span>
+    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 bg-muted/40 border border-border/60 rounded-xl p-3 group transition-all ${atStopName === stop.name ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : ''}`}>
+      <div className="flex gap-2 items-center">
+        <div {...attributes} {...listeners} className="cursor-grab p-1 text-muted-foreground hover:text-foreground shrink-0">
+          <GripVertical className="w-4 h-4" />
         </div>
+        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${atStopName === stop.name ? 'border-amber-500 text-amber-500 animate-pulse' : 'border-primary text-primary'}`}>
+          {index + 1}
+        </div>
+        <div className="flex-1 min-w-0 space-y-1">
+          <input
+            type="text"
+            value={stop.name}
+            onChange={(e) => onChangeName(stop.id, e.target.value)}
+            className="w-full bg-transparent font-medium outline-none text-sm placeholder:text-muted-foreground truncate"
+            placeholder="Stop name"
+          />
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="w-3 h-3 shrink-0" />
+            <input
+              type="number"
+              value={stop.durationMinutes}
+              onChange={(e) => onChangeDuration(stop.id, Number(e.target.value))}
+              className="w-10 bg-transparent outline-none border-b border-dashed border-muted-foreground/40 text-center"
+              min={1}
+            />
+            <span>min stop</span>
+          </div>
+        </div>
+        <button
+          onClick={() => onRemove(stop.id)}
+          className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors shrink-0"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
       </div>
-      <button
-        onClick={() => onRemove(stop.id)}
-        className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors shrink-0"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+
+      {atStopName === stop.name && countdownSec !== null && (
+        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-amber-500/10 rounded-lg border border-amber-500/30 animate-in slide-in-from-top-1">
+          <Clock className="w-3 h-3 text-amber-600 animate-spin-slow" />
+          <span className="text-xs font-bold text-amber-800 tabular-nums">
+            Departing in {Math.floor(countdownSec / 60)}:{String(countdownSec % 60).padStart(2, '0')}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -133,7 +146,41 @@ export default function RouteBuilder() {
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
 
   // Live truck position for in-progress routes
-  const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedKmh: number } | null>(null);
+  const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedKmh: number; atStopName: string | null } | null>(null);
+
+  // Stop countdown: track when truck arrived at current stop
+  const [stopArrivalTime, setStopArrivalTime] = useState<number | null>(null);
+  const [countdownSec, setCountdownSec] = useState<number | null>(null);
+  const prevStopNameRef = useRef<string | null>(null);
+
+  const atStopName = liveSnapshot?.atStopName ?? null;
+
+  // Track stop arrivals and start countdown
+  useEffect(() => {
+    const currentStop = atStopName;
+    if (currentStop && currentStop !== prevStopNameRef.current) {
+      setStopArrivalTime(Date.now());
+    } else if (!currentStop) {
+      setStopArrivalTime(null);
+      setCountdownSec(null);
+    }
+    prevStopNameRef.current = currentStop;
+  }, [atStopName]);
+
+  // Countdown ticker
+  useEffect(() => {
+    if (!stopArrivalTime || !atStopName) return;
+    const stopData = stops.find(s => s.name === atStopName);
+    const totalSec = (stopData?.durationMinutes ?? 5) * 60;
+    const tick = () => {
+      const elapsed = (Date.now() - stopArrivalTime) / 1000;
+      const remaining = Math.max(0, Math.round(totalSec - elapsed));
+      setCountdownSec(remaining);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [stopArrivalTime, atStopName, stops]);
 
   // Smoothly interpolated marker position for the admin map view
   const TICK_MS = 2000;
@@ -142,7 +189,11 @@ export default function RouteBuilder() {
   const animFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (liveSnapshot?.lat == null || liveSnapshot?.lng == null) return;
+    if (liveSnapshot?.lat == null || liveSnapshot?.lng == null) {
+      setMarkerPos(null);
+      markerPosRef.current = null;
+      return;
+    }
     const target = { lat: liveSnapshot.lat, lng: liveSnapshot.lng, bearing: liveSnapshot.bearing };
     const from = markerPosRef.current ?? target;
     const startTime = performance.now();
@@ -168,6 +219,7 @@ export default function RouteBuilder() {
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
   const [routeChangeMode, setRouteChangeMode] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
@@ -181,12 +233,26 @@ export default function RouteBuilder() {
   const duration = selectedRoute?.durationS ?? 0;
   const speedProfile: SpeedSegment[] = selectedRoute?.speedProfile ?? [];
 
-  const { data: existingRoute, refetch: refetchRoute } = useGetRoute(routeId || 0, {
-    query: { enabled: !!routeId },
+  const { data: existingRoute, refetch: refetchRoute } = useGetRoute(routeId || -1, {
+    query: { enabled: !!routeId } as any,
   });
 
   const isLiveRoute = ['in_progress', 'paused'].includes(existingRoute?.status ?? '');
   const routeLocked = isLiveRoute && !routeChangeMode;
+  const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
+  const liveSpeedKmh = liveSnapshot?.speedKmh ?? null;
+
+  const [copied, setCopied] = useState(false);
+  const copyShareUrl = () => {
+    const token = existingRoute?.shareToken;
+    if (!token) return;
+    const url = `${window.location.origin}/${token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      toast({ title: 'Link copied!', description: url });
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const createMut = useCreateRoute();
   const updateMut = useUpdateRoute();
@@ -233,7 +299,7 @@ export default function RouteBuilder() {
       }]);
       setSelectedIdx(0);
     }
-  }, [existingRoute]);
+  }, [existingRoute]); // Depend on existingRoute directly
 
   // --- Admin live WebSocket: show truck position when route is in_progress ---
   useEffect(() => {
@@ -257,7 +323,13 @@ export default function RouteBuilder() {
         try {
           const data = JSON.parse(e.data);
           if (data.lat !== undefined && data.lng !== undefined) {
-            setLiveSnapshot({ lat: data.lat, lng: data.lng, bearing: data.bearing ?? 0, speedKmh: data.speedKmh ?? 0 });
+            setLiveSnapshot({
+              lat: data.lat,
+              lng: data.lng,
+              bearing: data.bearing ?? 0,
+              speedKmh: data.speedKmh ?? 0,
+              atStopName: data.atStopName || null,
+            });
           }
         } catch { }
       };
@@ -291,7 +363,7 @@ export default function RouteBuilder() {
     } catch {
       // ignore corrupt draft
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-save draft on every change (new route only)
@@ -371,7 +443,7 @@ export default function RouteBuilder() {
       }
     }, 400);
     return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end, mapboxToken]);
 
   const sensors = useSensors(
@@ -493,7 +565,7 @@ export default function RouteBuilder() {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
             body: JSON.stringify({ name: label }),
-          }).catch(() => {});
+          }).catch(() => { });
         }
       });
       return;
@@ -564,14 +636,22 @@ export default function RouteBuilder() {
 
       if (isActivate) {
         await activateMut.mutateAsync({ id: savedRoute.id });
-        toast({ title: "Route Activated!", description: "Your route is ready. Press Play on the dashboard to start tracking." });
+        toast({ title: "Route Activated!", description: "Your route is ready. Press Start to begin tracking." });
+        localStorage.removeItem('tracktruck_route_draft');
+        // Redirect to the route's edit page so the Start button and controls become visible
+        setLocation(`/admin/routes/${savedRoute.id}/edit`);
       } else if (noRedirect) {
         toast({ title: "Route Updated", description: "The live route has been changed and the shared map is updating." });
+      } else if (isActivatedRoute) {
+        // Already activated — save without redirecting
+        toast({ title: "Route Saved", description: `"${savedRoute.name}" updated.` });
+        await refetchRoute();
       } else {
+        // True draft — save and go back to dashboard
         toast({ title: "Draft Saved", description: `"${savedRoute.name}" saved successfully.` });
+        localStorage.removeItem('tracktruck_route_draft');
+        setLocation('/admin');
       }
-      localStorage.removeItem('tracktruck_route_draft');
-      if (!noRedirect) setLocation('/admin');
     } catch (err: any) {
       const msg = err?.data?.message || err?.message || "Failed to save route";
       toast({ title: "Save failed", description: msg, variant: "destructive" });
@@ -618,15 +698,44 @@ export default function RouteBuilder() {
             <Settings className="w-4 h-4" />
           </button>
 
-          {/* Simulation controls — shown only when an existing route is ready/active/paused */}
-          {routeId && existingRoute?.status === 'ready' && (
+          {/* Loading state indicator */}
+          {routeId && !existingRoute && (
+            <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground text-xs font-medium animate-in fade-in">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Fetching controls...
+            </div>
+          )}
+
+          {/* Live speed badge */}
+          {existingRoute?.status === 'in_progress' && liveSpeedKmh !== null && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <Gauge className="w-4 h-4 text-emerald-600" />
+              <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedKmh}</span>
+              <span className="text-xs text-emerald-600">km/h</span>
+            </div>
+          )}
+
+          {/* Copy share URL */}
+          {routeId && existingRoute?.shareToken && (
+            <button
+              onClick={copyShareUrl}
+              className="flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors"
+              title="Copy public tracking link"
+            >
+              {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+              {copied ? 'Copied!' : 'Share URL'}
+            </button>
+          )}
+
+          {/* Simulation controls */}
+          {routeId && (existingRoute?.status === 'ready' || existingRoute?.status === 'completed') && (
             <button
               onClick={() => handleSimAction('start')}
               disabled={!!simActionLoading}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
             >
               {simActionLoading === 'start' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-              Start
+              {existingRoute?.status === 'completed' ? 'Restart' : 'Start'}
             </button>
           )}
           {routeId && existingRoute?.status === 'in_progress' && (
@@ -649,13 +758,16 @@ export default function RouteBuilder() {
               Resume
             </button>
           )}
-          {routeId && ['in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '') && (
+
+          {/* Reset button: visible for in_progress, paused, completed */}
+          {routeId && (['in_progress', 'paused', 'completed'].includes(existingRoute?.status || '')) && (
             <button
-              onClick={() => handleSimAction('reset')}
+              onClick={() => setShowResetModal(true)}
               disabled={!!simActionLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+              title="Reset truck to start point"
             >
-              {simActionLoading === 'reset' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+              <RotateCcw className="w-4 h-4" />
               Reset
             </button>
           )}
@@ -679,8 +791,17 @@ export default function RouteBuilder() {
                 Save Route Changes
               </button>
             </>
-          ) : !isLiveRoute ? (
-            /* Normal (non-live) route: show the standard Save Draft + Activate buttons */
+          ) : routeId && isActivatedRoute && !isLiveRoute ? (
+            /* Activated but not live (ready / completed): Save without redirect */
+            <button
+              onClick={() => handleSave(false)}
+              disabled={isSaving}
+              className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
+            </button>
+          ) : (routeId && !isActivatedRoute && existingRoute) || !routeId ? (
+            /* Existing Draft OR a New Route: Show Save Draft + Activate */
             <>
               <button
                 onClick={() => handleSave(false)}
@@ -855,11 +976,10 @@ export default function RouteBuilder() {
                           <button
                             key={i}
                             onClick={() => setSelectedIdx(i)}
-                            className={`w-full text-left rounded-xl border p-3 transition-all ${
-                              isSelected
+                            className={`w-full text-left rounded-xl border p-3 transition-all ${isSelected
                                 ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
                                 : 'border-border/60 bg-muted/20 hover:bg-muted/40 hover:border-border'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center justify-between mb-1.5">
                               <div className="flex items-center gap-2">
@@ -897,11 +1017,10 @@ export default function RouteBuilder() {
 
               <button
                 onClick={() => { setShowAddStop(!showAddStop); setMapClick(null); }}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${
-                  showAddStop
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddStop
                     ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
                     : 'bg-primary text-white hover:bg-primary/90 shadow-primary/20'
-                }`}
+                  }`}
               >
                 {showAddStop ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
@@ -927,6 +1046,8 @@ export default function RouteBuilder() {
                           key={stop.id}
                           stop={stop}
                           index={i}
+                          atStopName={atStopName}
+                          countdownSec={atStopName === stop.name ? countdownSec : null}
                           onRemove={(id) => {
                             setStops(s => {
                               const removing = s.find(x => x.id === id);
@@ -945,7 +1066,7 @@ export default function RouteBuilder() {
                                   method: 'PUT',
                                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
                                   body: JSON.stringify({ durationMinutes: val }),
-                                }).catch(() => {});
+                                }).catch(() => { });
                               }
                               return { ...x, durationMinutes: val };
                             }));
@@ -995,6 +1116,7 @@ export default function RouteBuilder() {
                 zoom: start ? 7 : 4,
               }}
               mapStyle="mapbox://styles/mapbox/streets-v12"
+              projection={{ name: 'mercator' }}
               cursor="crosshair"
               onClick={handleMapClick}
             >
@@ -1061,8 +1183,8 @@ export default function RouteBuilder() {
                       style={{ transform: `rotate(${markerPos.bearing}deg)` }}
                     >
                       <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
-                        <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5"/>
-                        <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white"/>
+                        <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />
+                        <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white" />
                       </svg>
                     </div>
                   </div>
@@ -1228,6 +1350,42 @@ export default function RouteBuilder() {
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Yes, change route
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirmation modal for resetting simulation */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowResetModal(false)} />
+          <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <RotateCcw className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-foreground mb-1">Reset truck to start?</h2>
+                <p className="text-sm text-muted-foreground">
+                  This will stop the current simulation (if running) and move the truck back to the start point. All metrics like distance and time will be cleared.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-xl border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 font-semibold text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowResetModal(false);
+                  await handleSimAction('reset');
+                }}
+                className="px-5 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm transition-colors shadow-sm"
+              >
+                Yes, reset route
               </button>
             </div>
           </div>

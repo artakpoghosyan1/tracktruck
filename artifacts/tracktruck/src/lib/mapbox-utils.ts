@@ -157,7 +157,7 @@ export async function fetchDirections(
         polyline,
         distanceM: route.distance as number,
         durationS: route.duration as number,
-        speedProfile: [],
+        speedProfile: extractSpeedProfile(route.legs ?? []),
       });
     }
 

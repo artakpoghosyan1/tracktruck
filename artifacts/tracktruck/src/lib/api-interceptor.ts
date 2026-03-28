@@ -15,9 +15,20 @@ window.fetch = async (resource, config) => {
   }
 
   const response = await originalFetch(resource, config);
+
+  const urlString = typeof resource === 'string' ? resource : (resource instanceof URL ? resource.toString() : resource.url);
   
-  // Handle unauthorized globally
-  if (response.status === 401 && !resource.toString().includes('/auth/login')) {
+  // Safely parse URL to check just the pathname
+  let isPathApi = false;
+  try {
+    const parsedUrl = new URL(urlString, window.location.origin);
+    isPathApi = parsedUrl.pathname.startsWith('/api');
+  } catch {
+    isPathApi = urlString.startsWith('/api');
+  }
+
+  // Handle unauthorized globally (only if it's OUR api, not mapbox)
+  if (response.status === 401 && isPathApi && !urlString.includes('/auth/login')) {
     localStorage.removeItem('tracktruck_token');
     if (window.location.pathname.startsWith('/admin')) {
       const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
@@ -28,4 +39,4 @@ window.fetch = async (resource, config) => {
   return response;
 };
 
-export {};
+export { };

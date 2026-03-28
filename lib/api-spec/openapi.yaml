@@ -1352,6 +1352,11 @@ components:
         bearing:
           type: number
           nullable: true
+        speedKmh:
+          type: number
+        atStopName:
+          type: string
+          nullable: true
       required:
         - routeId
         - timestamp

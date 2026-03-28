@@ -33,6 +33,15 @@ export default function PublicTracking() {
   const [snapshot, setSnapshot] = useState<SnapshotData | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
 
+  // Clear live data if route is not in progress
+  useEffect(() => {
+    if (route && route.status !== 'in_progress') {
+      setSnapshot(null);
+      setMarkerPos(null);
+      markerPosRef.current = null;
+    }
+  }, [route?.status]);
+
   // Smoothly interpolated marker position — animates from previous to new
   // position over one server-tick interval so the truck glides continuously.
   const TICK_MS = 2000;
@@ -48,7 +57,11 @@ export default function PublicTracking() {
   }, []);
 
   useEffect(() => {
-    if (snapshot?.lat == null || snapshot?.lng == null) return;
+    if (snapshot?.lat == null || snapshot?.lng == null) {
+      setMarkerPos(null);
+      markerPosRef.current = null;
+      return;
+    }
     const target = { lat: snapshot.lat, lng: snapshot.lng, bearing: snapshot.bearing ?? 0 };
     const from = markerPosRef.current ?? target;
     const startTime = performance.now();
@@ -111,14 +124,28 @@ export default function PublicTracking() {
     };
   }, [token, isError]);
 
-  // Fit map to route bounds
+  // Initial map state: fit to route, or zoom to truck if in_progress
+  const [hasInitialView, setHasInitialView] = useState(false);
   useEffect(() => {
-    if (route && mapRef.current && mapboxToken) {
+    if (!route || !mapRef.current || !mapboxToken || hasInitialView) return;
+
+    const snapshotPos = snapshot || route.snapshot;
+    if (snapshotPos?.lat != null && snapshotPos?.lng != null) {
+      // Route is live: zoom directly to truck
+      mapRef.current.easeTo({
+        center: [snapshotPos.lng, snapshotPos.lat],
+        zoom: 12,
+        duration: 2000,
+      });
+      setHasInitialView(true);
+    } else if (route.polyline.length > 0) {
+      // Not started yet: show the whole route
       const bounds = new mapboxgl.LngLatBounds([route.startLng, route.startLat], [route.endLng, route.endLat]);
       route.polyline.forEach(c => bounds.extend(c as [number, number]));
-      mapRef.current.fitBounds(bounds, { padding: 80, duration: 1000 });
+      mapRef.current.fitBounds(bounds, { padding: 80, duration: 1500 });
+      setHasInitialView(true);
     }
-  }, [route, mapboxToken]);
+  }, [route, snapshot, mapboxToken, hasInitialView]);
 
   const activeSnapshot = snapshot || route?.snapshot;
 
@@ -206,15 +233,6 @@ export default function PublicTracking() {
                 </div>
               )}
             </div>
-
-            {activeSnapshot?.atStopName && (
-              <div className="mt-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                <p className="text-sm font-semibold text-amber-800">
-                  Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Stops */}
@@ -295,6 +313,7 @@ export default function PublicTracking() {
           mapboxAccessToken={mapboxToken}
           initialViewState={{ longitude: route.startLng, latitude: route.startLat, zoom: 6 }}
           mapStyle="mapbox://styles/mapbox/streets-v12"
+          projection={{ name: 'mercator' }}
         >
           {/* Live Truck — position updated via smooth rAF interpolation */}
           {markerPos && (
@@ -306,8 +325,8 @@ export default function PublicTracking() {
                   style={{ transform: `rotate(${markerPos.bearing}deg)` }}
                 >
                   <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-                    <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5"/>
-                    <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white"/>
+                    <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />
+                    <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white" />
                   </svg>
                 </div>
               </div>
@@ -318,7 +337,8 @@ export default function PublicTracking() {
 
       {/* Bottom Panel */}
       <div className="absolute bottom-5 inset-x-4 z-10 pointer-events-none">
-        <div className="max-w-2xl mx-auto bg-white/95 backdrop-blur-xl rounded-3xl px-5 py-4 shadow-2xl border border-white/50 pointer-events-auto">
+        <div className="max-w-2xl mx-auto bg-white/95 backdrop-blur-xl rounded-3xl px-5 py-4 shadow-2xl border border-white/50 pointer-events-auto space-y-3">
+
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -330,19 +350,10 @@ export default function PublicTracking() {
               </span>
             </div>
 
-            {activeSnapshot?.atStopName ? (
-              <div className="flex-1 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                <p className="text-sm font-semibold text-amber-800 truncate">
-                  Stopped at <span className="font-bold">{activeSnapshot.atStopName}</span>
-                </p>
-              </div>
-            ) : <div className="flex-1" />}
-
             <div className="flex items-center gap-1.5 shrink-0">
               <Gauge className="w-4 h-4 text-slate-400" />
               <span className="text-2xl font-bold text-slate-900 tabular-nums">
-                {activeSnapshot?.speedKmh ?? 0}
+                {(activeSnapshot as SnapshotData | null)?.speedKmh ?? 0}
               </span>
               <span className="text-sm font-normal text-slate-400">km/h</span>
             </div>

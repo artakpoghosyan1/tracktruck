@@ -316,6 +316,8 @@ export interface LiveSnapshotResponse {
   lat?: number | null;
   lng?: number | null;
   bearing?: number | null;
+  speedKmh?: number;
+  atStopName?: string | null;
 }
 
 export interface PublicTrackResponse {

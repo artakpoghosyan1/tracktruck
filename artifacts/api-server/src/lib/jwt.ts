@@ -2,10 +2,10 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
 const JWT_SECRET = process.env["JWT_SECRET"] || "tracktruck-dev-secret-change-in-prod";
-const ACCESS_TOKEN_EXPIRES = "15m";
-const REFRESH_TOKEN_EXPIRES = "7d";
+const ACCESS_TOKEN_EXPIRES = "30d";
+const REFRESH_TOKEN_EXPIRES = "90d";
 
-export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+export const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days in ms
 
 export interface JwtPayload {
   sub: number;
@@ -29,7 +29,7 @@ export function signRefreshToken(userId: number, email: string): string {
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return (jwt.verify(token, JWT_SECRET) as any) as JwtPayload;
 }
 
 /** SHA-256 hash of a token string for safe DB storage */

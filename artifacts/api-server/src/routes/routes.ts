@@ -180,7 +180,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
 
 router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const id = parseInt(req.params["id"]!);
+  const id = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -236,7 +236,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
 
 router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRouteBody }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const id = parseInt(req.params["id"]!);
+  const id = parseInt(req.params["id"] as string);
 
   const [existing] = await db
     .select()
@@ -340,7 +340,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
 
 router.delete("/routes/:id", validate({ params: DeleteRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const id = parseInt(req.params["id"]!);
+  const id = parseInt(req.params["id"] as string);
 
   const [existing] = await db
     .select()
@@ -360,7 +360,7 @@ router.delete("/routes/:id", validate({ params: DeleteRouteParams }), async (req
 
 router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: CreateStopBody }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -403,8 +403,8 @@ router.put(
   validate({ params: UpdateStopParams, body: UpdateStopBody }),
   async (req, res) => {
     const authReq = req as AuthRequest;
-    const routeId = parseInt(req.params["id"]!);
-    const stopId = parseInt(req.params["stopId"]!);
+    const routeId = parseInt(req.params["id"] as string);
+    const stopId = parseInt(req.params["stopId"] as string);
 
     const [route] = await db
       .select()
@@ -457,8 +457,8 @@ router.put(
 
 router.delete("/routes/:id/stops/:stopId", validate({ params: DeleteStopParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
-  const stopId = parseInt(req.params["stopId"]!);
+  const routeId = parseInt(req.params["id"] as string);
+  const stopId = parseInt(req.params["stopId"] as string);
 
   const [route] = await db
     .select()

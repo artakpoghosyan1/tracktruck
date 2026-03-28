@@ -20,7 +20,7 @@ router.use(requireAuth());
 
 router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -72,7 +72,7 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
 
 router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -85,13 +85,21 @@ router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (
     return;
   }
 
-  if (route.status !== "ready") {
+  const allowedStartStatuses = ["ready", "completed"];
+  if (!allowedStartStatuses.includes(route.status)) {
     res.status(400).json({ error: "bad_request", message: `Route cannot be started from status: ${route.status}` });
     return;
   }
 
   const now = new Date();
+  const isRestart = route.status === "completed";
+
   await db.update(routesTable).set({ status: "in_progress", updatedAt: now }).where(eq(routesTable.id, routeId));
+
+  if (isRestart) {
+    // Re-activate share link if we are restarting a completed route
+    await db.update(shareLinksTable).set({ active: true }).where(eq(shareLinksTable.routeId, routeId));
+  }
 
   const existingSim = await db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, routeId)).limit(1);
   if (existingSim.length === 0) {
@@ -104,16 +112,32 @@ router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (
     });
   } else {
     await db.update(simulationStatesTable)
-      .set({ startedAt: now, pausedAt: null, updatedAt: now })
+      .set({
+        startedAt: now,
+        pausedAt: null,
+        updatedAt: now,
+        ...(isRestart && {
+          effectiveElapsedMs: 0,
+          distanceTraveledM: 0,
+          progressPercent: 0,
+        }),
+      })
       .where(eq(simulationStatesTable.routeId, routeId));
   }
 
-  res.json({ routeId, status: "in_progress", startedAt: now.toISOString(), effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0 });
+  res.json({
+    routeId,
+    status: "in_progress",
+    startedAt: now.toISOString(),
+    effectiveElapsedMs: 0,
+    distanceTraveledM: 0,
+    progressPercent: 0,
+  });
 });
 
 router.post("/routes/:id/pause", validate({ params: PauseRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -142,7 +166,7 @@ router.post("/routes/:id/pause", validate({ params: PauseRouteParams }), async (
 
 router.post("/routes/:id/resume", validate({ params: ResumeRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -166,7 +190,7 @@ router.post("/routes/:id/resume", validate({ params: ResumeRouteParams }), async
 
 router.post("/routes/:id/reset", validate({ params: ResetRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()
@@ -199,7 +223,7 @@ router.post("/routes/:id/reset", validate({ params: ResetRouteParams }), async (
 
 router.post("/routes/:id/recalculate", validate({ params: RecalculateRouteParams }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"]!);
+  const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db
     .select()

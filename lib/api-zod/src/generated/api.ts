@@ -124,9 +124,8 @@ export const listRoutesQuerySortDefault = `newest`;
 
 export const ListRoutesQueryParams = zod.object({
   page: zod.coerce.number().default(listRoutesQueryPageDefault),
-  page_size: zod.coerce
-    .number()
-    .refine((v) => [10, 25, 50].includes(v), { message: "page_size must be 10, 25, or 50" })
+  page_size: zod
+    .union([zod.literal(10), zod.literal(25), zod.literal(50)])
     .default(listRoutesQueryPageSizeDefault),
   status: zod
     .enum(["draft", "ready", "in_progress", "paused", "completed", "expired"])
@@ -665,6 +664,8 @@ export const GetPublicTrackResponse = zod.object({
       lat: zod.number().nullish(),
       lng: zod.number().nullish(),
       bearing: zod.number().nullish(),
+      speedKmh: zod.number().optional(),
+      atStopName: zod.string().nullish(),
     })
     .optional(),
 });
@@ -697,4 +698,6 @@ export const GetPublicTrackStateResponse = zod.object({
   lat: zod.number().nullish(),
   lng: zod.number().nullish(),
   bearing: zod.number().nullish(),
+  speedKmh: zod.number().optional(),
+  atStopName: zod.string().nullish(),
 });
