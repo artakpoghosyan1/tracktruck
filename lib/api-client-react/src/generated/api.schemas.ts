@@ -113,10 +113,8 @@ export interface RouteListItem {
   endLat: number;
   endLng: number;
   truckSpeedKmh: number;
-  paymentStatus?: string | null;
   shareToken?: string | null;
   shareLinkActive: boolean;
-  lastActivationDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -162,10 +160,8 @@ export interface RouteDetail {
   speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;
   estimatedDurationS: number;
-  paymentStatus?: string | null;
   shareToken?: string | null;
   shareLinkActive: boolean;
-  lastActivationDate?: string | null;
   stops: RouteStop[];
   createdAt: string;
   updatedAt: string;
@@ -198,8 +194,6 @@ export interface ActivateRouteResponse {
   routeId: number;
   status: string;
   shareToken: string;
-  paymentId: number;
-  paymentStatus: string;
 }
 
 export type SimulationStateResponseStatus =
@@ -227,56 +221,6 @@ export interface SimulationStateResponse {
   bearing?: number | null;
 }
 
-export interface CreatePaymentRequest {
-  routeId: number;
-  amount: number;
-  currency?: string;
-}
-
-export type PaymentCallbackRequestStatus =
-  (typeof PaymentCallbackRequestStatus)[keyof typeof PaymentCallbackRequestStatus];
-
-export const PaymentCallbackRequestStatus = {
-  authorized: "authorized",
-  paid: "paid",
-  failed: "failed",
-  expired: "expired",
-} as const;
-
-export type PaymentCallbackRequestProviderPayload = { [key: string]: unknown };
-
-export interface PaymentCallbackRequest {
-  paymentReference: string;
-  transactionId: string;
-  status: PaymentCallbackRequestStatus;
-  providerPayload?: PaymentCallbackRequestProviderPayload;
-}
-
-export type PaymentOrderResponseStatus =
-  (typeof PaymentOrderResponseStatus)[keyof typeof PaymentOrderResponseStatus];
-
-export const PaymentOrderResponseStatus = {
-  pending: "pending",
-  authorized: "authorized",
-  paid: "paid",
-  failed: "failed",
-  expired: "expired",
-  refunded: "refunded",
-} as const;
-
-export interface PaymentOrderResponse {
-  id: number;
-  routeId: number;
-  userId: number;
-  amount: number;
-  currency: string;
-  status: PaymentOrderResponseStatus;
-  paymentReference: string;
-  transactionId?: string | null;
-  approvalUrl?: string | null;
-  paidAt?: string | null;
-  createdAt: string;
-}
 
 export type PublicTrackResponseStatus =
   (typeof PublicTrackResponseStatus)[keyof typeof PublicTrackResponseStatus];

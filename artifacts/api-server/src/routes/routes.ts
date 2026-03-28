@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ilike, desc, asc, isNull, sql, count } from "drizzle-orm";
-import { db, routesTable, routeStopsTable, shareLinksTable, paymentOrdersTable } from "@workspace/db";
+import { db, routesTable, routeStopsTable, shareLinksTable } from "@workspace/db";
 import { broadcastToToken, broadcastToRoute } from "./ws";
 import {
   ListRoutesQueryParams,
@@ -55,7 +55,7 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
 
   const routeIds = routes.map((r) => r.id);
 
-  const [shareLinks, payments] =
+  const [shareLinks] =
     routeIds.length > 0
       ? await Promise.all([
           db.select().from(shareLinksTable).where(
@@ -64,25 +64,13 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
               eq(shareLinksTable.active, true),
             ),
           ),
-          db
-            .select()
-            .from(paymentOrdersTable)
-            .where(
-              sql`${paymentOrdersTable.routeId} = ANY(${sql`ARRAY[${sql.join(routeIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})`,
-            )
-            .orderBy(desc(paymentOrdersTable.createdAt)),
         ])
-      : [[], []];
+      : [[]];
 
   const shareMap = new Map(shareLinks.map((sl) => [sl.routeId, sl]));
-  const paymentMap = new Map<number, (typeof payments)[0]>();
-  for (const p of payments) {
-    if (!paymentMap.has(p.routeId)) paymentMap.set(p.routeId, p);
-  }
 
   const data = routes.map((r) => {
     const shareLink = shareMap.get(r.id);
-    const payment = paymentMap.get(r.id);
     return {
       id: r.id,
       name: r.name,
@@ -92,10 +80,8 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
       endLat: r.endLat,
       endLng: r.endLng,
       truckSpeedKmh: r.truckSpeedKmh,
-      paymentStatus: payment?.status ?? null,
       shareToken: shareLink?.token ?? null,
       shareLinkActive: shareLink?.active ?? false,
-      lastActivationDate: payment?.paidAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     };
@@ -168,10 +154,8 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     speedProfile: route.speedProfile,
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
-    paymentStatus: null,
     shareToken: null,
     shareLinkActive: false,
-    lastActivationDate: null,
     stops: [],
     createdAt: route.createdAt.toISOString(),
     updatedAt: route.updatedAt.toISOString(),
@@ -193,14 +177,12 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     return;
   }
 
-  const [stops, shareLinks, payments] = await Promise.all([
+  const [stops, shareLinks] = await Promise.all([
     db.select().from(routeStopsTable).where(eq(routeStopsTable.routeId, id)).orderBy(asc(routeStopsTable.sortOrder)),
     db.select().from(shareLinksTable).where(and(eq(shareLinksTable.routeId, id), eq(shareLinksTable.active, true))).limit(1),
-    db.select().from(paymentOrdersTable).where(eq(paymentOrdersTable.routeId, id)).orderBy(desc(paymentOrdersTable.createdAt)).limit(1),
   ]);
 
   const shareLink = shareLinks[0];
-  const payment = payments[0];
 
   res.json({
     id: route.id,
@@ -215,10 +197,9 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     speedProfile: route.speedProfile,
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
-    paymentStatus: payment?.status ?? null,
     shareToken: shareLink?.token ?? null,
     shareLinkActive: shareLink?.active ?? false,
-    lastActivationDate: payment?.paidAt?.toISOString() ?? null,
+    lastActivationDate: null,
     stops: stops.map((s) => ({
       id: s.id,
       routeId: s.routeId,
@@ -328,10 +309,8 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     speedProfile: updated.speedProfile,
     distanceM: updated.distanceM,
     estimatedDurationS: updated.estimatedDurationS,
-    paymentStatus: null,
     shareToken: null,
     shareLinkActive: false,
-    lastActivationDate: null,
     stops: [],
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),

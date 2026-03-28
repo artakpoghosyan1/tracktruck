@@ -18,8 +18,6 @@ tags:
     description: Route stop management
   - name: simulation
     description: Simulation control
-  - name: payments
-    description: Payment operations
   - name: public
     description: Public tracking
 
@@ -562,67 +560,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/SimulationStateResponse"
 
-  /payments/create:
-    post:
-      operationId: createPayment
-      tags: [payments]
-      summary: Create a payment order
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePaymentRequest"
-      responses:
-        "201":
-          description: Payment created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaymentOrderResponse"
-
-  /payments/callback:
-    post:
-      operationId: paymentCallback
-      tags: [payments]
-      summary: Payment provider callback
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PaymentCallbackRequest"
-      responses:
-        "200":
-          description: Callback processed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /payments/{id}:
-    get:
-      operationId: getPayment
-      tags: [payments]
-      summary: Get payment status
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Payment details
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaymentOrderResponse"
-
   /public/track/{token}:
     get:
       operationId: getPublicTrack
@@ -933,18 +870,11 @@ components:
           type: number
         truckSpeedKmh:
           type: number
-        paymentStatus:
-          type: string
-          nullable: true
         shareToken:
           type: string
           nullable: true
         shareLinkActive:
           type: boolean
-        lastActivationDate:
-          type: string
-          format: date-time
-          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -1008,18 +938,11 @@ components:
           type: number
         estimatedDurationS:
           type: number
-        paymentStatus:
-          type: string
-          nullable: true
         shareToken:
           type: string
           nullable: true
         shareLinkActive:
           type: boolean
-        lastActivationDate:
-          type: string
-          format: date-time
-          nullable: true
         stops:
           type: array
           items:
@@ -1138,16 +1061,10 @@ components:
           type: string
         shareToken:
           type: string
-        paymentId:
-          type: integer
-        paymentStatus:
-          type: string
       required:
         - routeId
         - status
         - shareToken
-        - paymentId
-        - paymentStatus
 
     SimulationStateResponse:
       type: object
@@ -1186,78 +1103,6 @@ components:
         - effectiveElapsedMs
         - distanceTraveledM
         - progressPercent
-
-    CreatePaymentRequest:
-      type: object
-      properties:
-        routeId:
-          type: integer
-        amount:
-          type: number
-        currency:
-          type: string
-          default: AMD
-      required:
-        - routeId
-        - amount
-
-    PaymentCallbackRequest:
-      type: object
-      properties:
-        paymentReference:
-          type: string
-        transactionId:
-          type: string
-        status:
-          type: string
-          enum: [authorized, paid, failed, expired]
-        providerPayload:
-          type: object
-      required:
-        - paymentReference
-        - transactionId
-        - status
-
-    PaymentOrderResponse:
-      type: object
-      properties:
-        id:
-          type: integer
-        routeId:
-          type: integer
-        userId:
-          type: integer
-        amount:
-          type: number
-        currency:
-          type: string
-        status:
-          type: string
-          enum: [pending, authorized, paid, failed, expired, refunded]
-        paymentReference:
-          type: string
-        transactionId:
-          type: string
-          nullable: true
-        approvalUrl:
-          type: string
-          nullable: true
-        paidAt:
-          type: string
-          format: date-time
-          nullable: true
-        createdAt:
-          type: string
-          format: date-time
-      required:
-        - id
-        - routeId
-        - userId
-        - amount
-        - currency
-        - status
-        - paymentReference
-        - createdAt
 
     PublicTrackResponse:
       type: object

@@ -152,10 +152,8 @@ export const ListRoutesResponse = zod.object({
       endLat: zod.number(),
       endLng: zod.number(),
       truckSpeedKmh: zod.number(),
-      paymentStatus: zod.string().nullish(),
       shareToken: zod.string().nullish(),
       shareLinkActive: zod.boolean(),
-      lastActivationDate: zod.date().nullish(),
       createdAt: zod.date(),
       updatedAt: zod.date(),
     }),
@@ -239,10 +237,8 @@ export const GetRouteResponse = zod.object({
     .optional(),
   distanceM: zod.number(),
   estimatedDurationS: zod.number(),
-  paymentStatus: zod.string().nullish(),
   shareToken: zod.string().nullish(),
   shareLinkActive: zod.boolean(),
-  lastActivationDate: zod.date().nullish(),
   stops: zod.array(
     zod.object({
       id: zod.number(),
@@ -329,10 +325,8 @@ export const UpdateRouteResponse = zod.object({
     .optional(),
   distanceM: zod.number(),
   estimatedDurationS: zod.number(),
-  paymentStatus: zod.string().nullish(),
   shareToken: zod.string().nullish(),
   shareLinkActive: zod.boolean(),
-  lastActivationDate: zod.date().nullish(),
   stops: zod.array(
     zod.object({
       id: zod.number(),
@@ -427,8 +421,6 @@ export const ActivateRouteResponse = zod.object({
   routeId: zod.number(),
   status: zod.string(),
   shareToken: zod.string(),
-  paymentId: zod.number(),
-  paymentStatus: zod.string(),
 });
 
 /**
@@ -564,59 +556,6 @@ export const RecalculateRouteResponse = zod.object({
   lat: zod.number().nullish(),
   lng: zod.number().nullish(),
   bearing: zod.number().nullish(),
-});
-
-/**
- * @summary Create a payment order
- */
-export const createPaymentBodyCurrencyDefault = `AMD`;
-
-export const CreatePaymentBody = zod.object({
-  routeId: zod.number(),
-  amount: zod.number(),
-  currency: zod.string().default(createPaymentBodyCurrencyDefault),
-});
-
-/**
- * @summary Payment provider callback
- */
-export const PaymentCallbackBody = zod.object({
-  paymentReference: zod.string(),
-  transactionId: zod.string(),
-  status: zod.enum(["authorized", "paid", "failed", "expired"]),
-  providerPayload: zod.object({}).passthrough().optional(),
-});
-
-export const PaymentCallbackResponse = zod.object({
-  message: zod.string(),
-});
-
-/**
- * @summary Get payment status
- */
-export const GetPaymentParams = zod.object({
-  id: zod.coerce.number(),
-});
-
-export const GetPaymentResponse = zod.object({
-  id: zod.number(),
-  routeId: zod.number(),
-  userId: zod.number(),
-  amount: zod.number(),
-  currency: zod.string(),
-  status: zod.enum([
-    "pending",
-    "authorized",
-    "paid",
-    "failed",
-    "expired",
-    "refunded",
-  ]),
-  paymentReference: zod.string(),
-  transactionId: zod.string().nullish(),
-  approvalUrl: zod.string().nullish(),
-  paidAt: zod.date().nullish(),
-  createdAt: zod.date(),
 });
 
 /**
