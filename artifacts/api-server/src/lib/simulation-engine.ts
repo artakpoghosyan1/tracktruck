@@ -293,7 +293,7 @@ function computePositionWithStops(
 // Simulation tick
 // ---------------------------------------------------------------------------
 
-const COMPLETION_GRACE_S = 75; // seconds to linger at destination before marking unavailable
+const COMPLETION_GRACE_S = 5; // seconds to linger at destination before marking as completed
 
 /** routeId → Date.now() when pos.completed first became true (grace period start) */
 const completionGraceMap = new Map<number, number>();

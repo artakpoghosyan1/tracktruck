@@ -5,9 +5,9 @@ import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, Zap, Flag, GripVertical,
-  Plus, Trash2, Clock, Navigation, Map as MapIcon, Settings,
+  Plus, Trash2, Clock, Map as MapIcon, Settings,
   MapPin, X, CheckCircle2, Loader2, Play, Pause,
-  Pencil, AlertTriangle, Gauge, Copy, Check, RotateCcw
+  Pencil, AlertTriangle, Gauge, Copy, Check
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -18,7 +18,7 @@ import { AddressSearch } from "@/components/AddressSearch";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
-import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, useStartRoute, usePauseRoute, useResumeRoute, useResetRoute } from "@workspace/api-client-react";
+import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, useStartRoute, usePauseRoute, useResumeRoute } from "@workspace/api-client-react";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
 
@@ -219,7 +219,6 @@ export default function RouteBuilder() {
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
   const [routeChangeMode, setRouteChangeMode] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showResetModal, setShowResetModal] = useState(false);
 
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
@@ -238,7 +237,8 @@ export default function RouteBuilder() {
   });
 
   const isLiveRoute = ['in_progress', 'paused'].includes(existingRoute?.status ?? '');
-  const routeLocked = isLiveRoute && !routeChangeMode;
+  const isCompleted = existingRoute?.status === 'completed';
+  const routeLocked = (isLiveRoute && !routeChangeMode) || isCompleted;
   const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
   const liveSpeedKmh = liveSnapshot?.speedKmh ?? null;
 
@@ -261,17 +261,15 @@ export default function RouteBuilder() {
   const startMut = useStartRoute();
   const pauseMut = usePauseRoute();
   const resumeMut = useResumeRoute();
-  const resetMut = useResetRoute();
   const [simActionLoading, setSimActionLoading] = useState<string | null>(null);
 
-  const handleSimAction = async (action: 'start' | 'pause' | 'resume' | 'reset') => {
+  const handleSimAction = async (action: 'start' | 'pause' | 'resume') => {
     if (!routeId) return;
     setSimActionLoading(action);
     try {
       if (action === 'start') await startMut.mutateAsync({ id: routeId });
       if (action === 'pause') await pauseMut.mutateAsync({ id: routeId });
       if (action === 'resume') await resumeMut.mutateAsync({ id: routeId });
-      if (action === 'reset') await resetMut.mutateAsync({ id: routeId });
       await refetchRoute();
     } catch {
       toast({ title: "Error", description: `Failed to ${action} simulation.`, variant: "destructive" });
@@ -728,14 +726,14 @@ export default function RouteBuilder() {
           )}
 
           {/* Simulation controls */}
-          {routeId && (existingRoute?.status === 'ready' || existingRoute?.status === 'completed') && (
+          {routeId && (existingRoute?.status === 'ready') && (
             <button
               onClick={() => handleSimAction('start')}
               disabled={!!simActionLoading}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
             >
               {simActionLoading === 'start' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-              {existingRoute?.status === 'completed' ? 'Restart' : 'Start'}
+              Start
             </button>
           )}
           {routeId && existingRoute?.status === 'in_progress' && (
@@ -759,19 +757,6 @@ export default function RouteBuilder() {
             </button>
           )}
 
-          {/* Reset button: visible for in_progress, paused, completed */}
-          {routeId && (['in_progress', 'paused', 'completed'].includes(existingRoute?.status || '')) && (
-            <button
-              onClick={() => setShowResetModal(true)}
-              disabled={!!simActionLoading}
-              className="flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
-              title="Reset truck to start point"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Reset
-            </button>
-          )}
-
           {routeChangeMode && isLiveRoute ? (
             /* In route-change mode: show Save Route Changes + Cancel */
             <>
@@ -787,12 +772,12 @@ export default function RouteBuilder() {
                 disabled={isSaving}
                 className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
               >
-                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save Route Changes
               </button>
             </>
-          ) : routeId && isActivatedRoute && !isLiveRoute ? (
-            /* Activated but not live (ready / completed): Save without redirect */
+          ) : routeId && isActivatedRoute && !isLiveRoute && !isCompleted ? (
+            /* Activated but not live (ready): Save without redirect */
             <button
               onClick={() => handleSave(false)}
               disabled={isSaving}
@@ -828,6 +813,19 @@ export default function RouteBuilder() {
         {/* Left Panel */}
         <aside className="w-96 shrink-0 bg-background border-r border-border/60 flex flex-col overflow-y-auto">
           <div className="p-5 space-y-5">
+            {isCompleted && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+                <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center shrink-0 shadow-sm">
+                  <CheckCircle2 className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-emerald-900 leading-tight">Route Completed</h3>
+                  <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
+                    This route is finished and locked. Press <strong>Reset</strong> below to clear history and run it again.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Name & Speed */}
             <div className="space-y-4">
@@ -836,7 +834,8 @@ export default function RouteBuilder() {
                 <input
                   type="text" value={name} onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. City Center to Airport"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-card border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-card border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm disabled:opacity-60"
+                  disabled={isCompleted}
                 />
               </div>
             </div>
@@ -875,13 +874,15 @@ export default function RouteBuilder() {
                       </div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setRouteChangeMode(true)}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm transition-colors"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    Change Route
-                  </button>
+                  {!isCompleted && (
+                    <button
+                      onClick={() => setRouteChangeMode(true)}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm transition-colors"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Change Route
+                    </button>
+                  )}
                 </div>
               ) : (
                 /* Editable state */
@@ -1350,42 +1351,6 @@ export default function RouteBuilder() {
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Yes, change route
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Confirmation modal for resetting simulation */}
-      {showResetModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowResetModal(false)} />
-          <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-                <RotateCcw className="w-5 h-5 text-red-500" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-foreground mb-1">Reset truck to start?</h2>
-                <p className="text-sm text-muted-foreground">
-                  This will stop the current simulation (if running) and move the truck back to the start point. All metrics like distance and time will be cleared.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowResetModal(false)}
-                className="px-4 py-2 rounded-xl border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 font-semibold text-sm transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  setShowResetModal(false);
-                  await handleSimAction('reset');
-                }}
-                className="px-5 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm transition-colors shadow-sm"
-              >
-                Yes, reset route
               </button>
             </div>
           </div>

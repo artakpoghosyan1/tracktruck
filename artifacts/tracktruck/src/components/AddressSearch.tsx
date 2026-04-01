@@ -56,6 +56,7 @@ export function AddressSearch({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const isFocused = useRef(false);
@@ -90,6 +91,7 @@ export function AddressSearch({
           : await searchNominatim(query);
         setSuggestions(results);
         setIsOpen(results.length > 0);
+        setSelectedIndex(-1);
       } catch {
         setSuggestions([]);
         setIsOpen(false);
@@ -102,10 +104,35 @@ export function AddressSearch({
   }, [query, mapboxToken]);
 
   const handleSelect = (s: Suggestion) => {
+    suppressSearch.current = true;
     setQuery(s.fullName);
     setIsOpen(false);
     setSuggestions([]);
+    setSelectedIndex(-1);
+    
+    // Blur input to ensure dropdown closes and search doesn't re-trigger immediately
+    inputRef.current?.blur();
+    
     onSelect({ placeName: s.fullName, lng: s.lng, lat: s.lat });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isOpen || suggestions.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : prev));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (selectedIndex >= 0) {
+        handleSelect(suggestions[selectedIndex]);
+      }
+    } else if (e.key === "Escape") {
+      setIsOpen(false);
+    }
   };
 
   return (
@@ -117,8 +144,9 @@ export function AddressSearch({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
           onFocus={() => { isFocused.current = true; suggestions.length > 0 && setIsOpen(true); }}
-          onBlur={() => { isFocused.current = false; setTimeout(() => setIsOpen(false), 150); }}
+          onBlur={() => { isFocused.current = false; setTimeout(() => setIsOpen(false), 200); }}
           placeholder={placeholder}
           className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-background border border-border focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all text-sm"
         />
@@ -129,15 +157,18 @@ export function AddressSearch({
 
       {isOpen && suggestions.length > 0 && (
         <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
-          {suggestions.map((s) => (
+          {suggestions.map((s, index) => (
             <button
               key={s.id}
               type="button"
-              className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted transition-colors text-left border-b border-border/30 last:border-0"
+              className={`w-full flex items-start gap-3 px-4 py-3 transition-colors text-left border-b border-border/30 last:border-0 ${
+                index === selectedIndex ? "bg-primary/10 border-l-2 border-l-primary" : "hover:bg-muted"
+              }`}
               onMouseDown={(e) => {
                 e.preventDefault();
                 handleSelect(s);
               }}
+              onMouseEnter={() => setSelectedIndex(index)}
             >
               <MapPin className="w-4 h-4 text-primary mt-0.5 shrink-0" />
               <div className="min-w-0">

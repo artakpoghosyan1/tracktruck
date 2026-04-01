@@ -7,12 +7,11 @@ import {
   StartRouteParams,
   PauseRouteParams,
   ResumeRouteParams,
-  ResetRouteParams,
   RecalculateRouteParams,
 } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
-import { positionAlongPolyline, totalPolylineDistance } from "../lib/geo";
+import { totalPolylineDistance } from "../lib/geo";
 
 const router: IRouter = Router();
 
@@ -85,9 +84,9 @@ router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (
     return;
   }
 
-  const allowedStartStatuses = ["ready", "completed"];
+  const allowedStartStatuses = ["ready"];
   if (!allowedStartStatuses.includes(route.status)) {
-    res.status(400).json({ error: "bad_request", message: `Route cannot be started from status: ${route.status}` });
+    res.status(400).json({ error: "bad_request", message: `Route cannot be started from status: ${route.status}. Reset it first.` });
     return;
   }
 
@@ -186,39 +185,6 @@ router.post("/routes/:id/resume", validate({ params: ResumeRouteParams }), async
     .where(eq(simulationStatesTable.routeId, routeId));
 
   res.json({ routeId, status: "in_progress" });
-});
-
-router.post("/routes/:id/reset", validate({ params: ResetRouteParams }), async (req, res) => {
-  const authReq = req as AuthRequest;
-  const routeId = parseInt(req.params["id"] as string);
-
-  const [route] = await db
-    .select()
-    .from(routesTable)
-    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
-    .limit(1);
-
-  if (!route) {
-    res.status(404).json({ error: "not_found", message: "Route not found" });
-    return;
-  }
-
-  const allowedStatuses = ["in_progress", "paused", "completed"];
-  if (!allowedStatuses.includes(route.status)) {
-    res.status(400).json({ error: "bad_request", message: `Route cannot be reset from status: ${route.status}` });
-    return;
-  }
-
-  const now = new Date();
-  await db.update(routesTable).set({ status: "ready", updatedAt: now }).where(eq(routesTable.id, routeId));
-  await db.update(simulationStatesTable)
-    .set({ effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0, startedAt: null, pausedAt: null, updatedAt: now })
-    .where(eq(simulationStatesTable.routeId, routeId));
-
-  // Re-activate share link
-  await db.update(shareLinksTable).set({ active: true }).where(eq(shareLinksTable.routeId, routeId));
-
-  res.json({ routeId, status: "ready" });
 });
 
 router.post("/routes/:id/recalculate", validate({ params: RecalculateRouteParams }), async (req, res) => {

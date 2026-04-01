@@ -230,6 +230,11 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     return;
   }
 
+  if (existing.status === "completed") {
+    res.status(400).json({ error: "bad_request", message: "Route is completed and cannot be edited. Reset it first." });
+    return;
+  }
+
   const { name, startLat, startLng, endLat, endLng, truckSpeedKmh, polyline, speedProfile } = req.body as {
     name?: string;
     startLat?: number;
@@ -352,6 +357,11 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
     return;
   }
 
+  if (route.status === "completed") {
+    res.status(400).json({ error: "bad_request", message: "Route is completed and stops cannot be modified. Reset it first." });
+    return;
+  }
+
   const { name, lat, lng, durationMinutes = 5, sortOrder = 0 } = req.body as {
     name: string;
     lat: number;
@@ -393,6 +403,11 @@ router.put(
 
     if (!route) {
       res.status(404).json({ error: "not_found", message: "Route not found" });
+      return;
+    }
+
+    if (route.status === "completed") {
+      res.status(400).json({ error: "bad_request", message: "Route is completed and stops cannot be modified. Reset it first." });
       return;
     }
 
@@ -447,6 +462,11 @@ router.delete("/routes/:id/stops/:stopId", validate({ params: DeleteStopParams }
 
   if (!route) {
     res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  if (route.status === "completed") {
+    res.status(400).json({ error: "bad_request", message: "Route is completed and stops cannot be modified. Reset it first." });
     return;
   }
 

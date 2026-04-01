@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { 
   Plus, Search, Play, Pause,
-  RotateCcw, Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2
+  Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2, Eye
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { 
@@ -11,7 +11,6 @@ import {
   useStartRoute, 
   usePauseRoute, 
   useResumeRoute, 
-  useResetRoute, 
   useDeleteRoute,
   ListRoutesStatus
 } from "@workspace/api-client-react";
@@ -33,15 +32,13 @@ export default function Dashboard() {
   const startMut = useStartRoute({ mutation: { onSuccess: () => refetch() }});
   const pauseMut = usePauseRoute({ mutation: { onSuccess: () => refetch() }});
   const resumeMut = useResumeRoute({ mutation: { onSuccess: () => refetch() }});
-  const resetMut = useResetRoute({ mutation: { onSuccess: () => refetch() }});
   const deleteMut = useDeleteRoute({ mutation: { onSuccess: () => refetch() }});
 
-  const handleAction = async (action: 'start'|'pause'|'resume'|'reset'|'delete', id: number) => {
+  const handleAction = async (action: 'start'|'pause'|'resume'|'delete', id: number) => {
     try {
       if (action === 'start') await startMut.mutateAsync({ id });
       if (action === 'pause') await pauseMut.mutateAsync({ id });
       if (action === 'resume') await resumeMut.mutateAsync({ id });
-      if (action === 'reset') await resetMut.mutateAsync({ id });
       if (action === 'delete') {
         if (confirm("Are you sure you want to delete this route?")) {
           await deleteMut.mutateAsync({ id });
@@ -165,13 +162,24 @@ export default function Dashboard() {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Link
-                          href={`/admin/routes/${route.id}/edit`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                          title="Edit route"
-                        >
-                          <Edit className="w-3.5 h-3.5" /> Edit
-                        </Link>
+                        {route.status !== 'completed' && (
+                          <Link
+                            href={`/admin/routes/${route.id}/edit`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                            title="Edit route"
+                          >
+                            <Edit className="w-3.5 h-3.5" /> Edit
+                          </Link>
+                        )}
+                        {route.status === 'completed' && (
+                          <Link
+                            href={`/admin/routes/${route.id}/edit`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                            title="View route details"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View
+                          </Link>
+                        )}
                         {route.status === 'ready' && (
                           <button
                             onClick={() => handleAction('start', route.id)}
@@ -197,15 +205,6 @@ export default function Dashboard() {
                             title="Resume"
                           >
                             <Play className="w-3.5 h-3.5 fill-current" /> Resume
-                          </button>
-                        )}
-                        {(route.status === 'in_progress' || route.status === 'paused' || route.status === 'completed') && (
-                          <button
-                            onClick={() => handleAction('reset', route.id)}
-                            className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                            title="Reset to start"
-                          >
-                            <RotateCcw className="w-4 h-4" />
                           </button>
                         )}
                         <button
