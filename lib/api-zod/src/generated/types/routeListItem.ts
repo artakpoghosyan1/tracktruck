@@ -16,10 +16,8 @@ export interface RouteListItem {
   endLat: number;
   endLng: number;
   truckSpeedKmh: number;
-  paymentStatus?: string | null;
   shareToken?: string | null;
   shareLinkActive: boolean;
-  lastActivationDate?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

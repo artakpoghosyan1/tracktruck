@@ -7,6 +7,7 @@ import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Signup from "@/pages/signup";
 import Dashboard from "@/pages/admin/dashboard";
+import SuperAdmin from "@/pages/admin/super-admin";
 import RouteBuilder from "@/pages/admin/route-builder";
 import PublicTracking from "@/pages/public/tracking";
 import "@/lib/api-interceptor"; // Import the fetch interceptor globally
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/signup" component={Signup} />
       
       <Route path="/admin" component={Dashboard} />
+      <Route path="/admin/super" component={SuperAdmin} />
       <Route path="/admin/routes/new" component={RouteBuilder} />
       <Route path="/admin/routes/:id/edit" component={RouteBuilder} />
       

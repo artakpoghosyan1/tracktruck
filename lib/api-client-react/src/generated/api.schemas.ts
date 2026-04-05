@@ -46,11 +46,21 @@ export interface RefreshRequest {
   refreshToken: string;
 }
 
+export type UserProfileRole =
+  (typeof UserProfileRole)[keyof typeof UserProfileRole];
+
+export const UserProfileRole = {
+  super_admin: "super_admin",
+  admin: "admin",
+  user: "user",
+} as const;
+
 export interface UserProfile {
   id: number;
   email: string;
   name: string;
   emailVerified: boolean;
+  role: UserProfileRole;
   createdAt: string;
 }
 
@@ -221,7 +231,6 @@ export interface SimulationStateResponse {
   bearing?: number | null;
 }
 
-
 export type PublicTrackResponseStatus =
   (typeof PublicTrackResponseStatus)[keyof typeof PublicTrackResponseStatus];
 
@@ -277,6 +286,64 @@ export interface PublicTrackResponse {
   distanceM: number;
   estimatedDurationS: number;
   snapshot?: LiveSnapshotResponse;
+}
+
+export type AllowedEmailRole =
+  (typeof AllowedEmailRole)[keyof typeof AllowedEmailRole];
+
+export const AllowedEmailRole = {
+  super_admin: "super_admin",
+  admin: "admin",
+  user: "user",
+} as const;
+
+export interface AllowedEmail {
+  id: number;
+  email: string;
+  role: AllowedEmailRole;
+  isPaid: boolean;
+  routeLimit: number;
+  usedRoutes: number;
+  createdAt: string;
+}
+
+export type AddAllowedEmailRequestRole =
+  (typeof AddAllowedEmailRequestRole)[keyof typeof AddAllowedEmailRequestRole];
+
+export const AddAllowedEmailRequestRole = {
+  super_admin: "super_admin",
+  admin: "admin",
+  user: "user",
+} as const;
+
+export type AddAllowedEmailRequestRouteLimit =
+  (typeof AddAllowedEmailRequestRouteLimit)[keyof typeof AddAllowedEmailRequestRouteLimit];
+
+export const AddAllowedEmailRequestRouteLimit = {
+  NUMBER_25: 25,
+  NUMBER_50: 50,
+  NUMBER_100: 100,
+} as const;
+
+export interface AddAllowedEmailRequest {
+  email: string;
+  role?: AddAllowedEmailRequestRole;
+  isPaid?: boolean;
+  routeLimit?: AddAllowedEmailRequestRouteLimit;
+}
+
+export type UpdateAllowedEmailRequestRouteLimit =
+  (typeof UpdateAllowedEmailRequestRouteLimit)[keyof typeof UpdateAllowedEmailRequestRouteLimit];
+
+export const UpdateAllowedEmailRequestRouteLimit = {
+  NUMBER_25: 25,
+  NUMBER_50: 50,
+  NUMBER_100: 100,
+} as const;
+
+export interface UpdateAllowedEmailRequest {
+  isPaid?: boolean;
+  routeLimit?: UpdateAllowedEmailRequestRouteLimit;
 }
 
 export type ListRoutesParams = {

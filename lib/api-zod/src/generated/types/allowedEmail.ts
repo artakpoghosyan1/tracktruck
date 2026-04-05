@@ -5,13 +5,14 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { UserProfileRole } from "./userProfileRole";
+import type { AllowedEmailRole } from "./allowedEmailRole";
 
-export interface UserProfile {
+export interface AllowedEmail {
   id: number;
   email: string;
-  name: string;
-  emailVerified: boolean;
-  role: UserProfileRole;
+  role: AllowedEmailRole;
+  isPaid: boolean;
+  routeLimit: number;
+  usedRoutes: number;
   createdAt: Date;
 }

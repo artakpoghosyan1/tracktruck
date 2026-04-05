@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, isNull } from "drizzle-orm";
 import crypto from "crypto";
-import { db, routesTable, simulationStatesTable, shareLinksTable } from "@workspace/db";
+import { db, routesTable, simulationStatesTable, shareLinksTable, allowedEmailsTable } from "@workspace/db";
 import {
   ActivateRouteParams,
   StartRouteParams,
@@ -38,8 +38,21 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     return;
   }
 
-  // Move route to ready
-  await db.update(routesTable).set({ status: "ready", updatedAt: new Date() }).where(eq(routesTable.id, routeId));
+  const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, authReq.user.email)).limit(1);
+  if (allowed && allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
+    res.status(403).json({ error: "quota_exceeded", message: "Route limit reached. Upgrade your plan to activate more routes." });
+    return;
+  }
+
+  // Move route to ready and increment used routes
+  await db.transaction(async (tx) => {
+    await tx.update(routesTable).set({ status: "ready", updatedAt: new Date() }).where(eq(routesTable.id, routeId));
+    if (allowed) {
+      await tx.update(allowedEmailsTable)
+        .set({ usedRoutes: (allowed.usedRoutes || 0) + 1 })
+        .where(eq(allowedEmailsTable.email, authReq.user.email));
+    }
+  });
 
   // Create share token
   const token = crypto.randomBytes(16).toString("hex");

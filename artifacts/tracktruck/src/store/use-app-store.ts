@@ -3,11 +3,19 @@ import { persist } from 'zustand/middleware';
 
 const ENV_MAPBOX_TOKEN = (import.meta as any).env?.VITE_MAPBOX_TOKEN || '';
 
+interface User {
+  id: number;
+  email: string;
+  name: string;
+  role: 'super_admin' | 'admin' | 'user';
+}
+
 interface AppState {
   mapboxToken: string;
   setMapboxToken: (token: string) => void;
   isAuthenticated: boolean;
-  setAuthenticated: (status: boolean) => void;
+  user: User | null;
+  setAuthenticated: (status: boolean, user?: User | null) => void;
   mapboxPromptOpen: boolean;
   openMapboxPrompt: () => void;
   closeMapboxPrompt: () => void;
@@ -19,7 +27,8 @@ export const useAppStore = create<AppState>()(
       mapboxToken: ENV_MAPBOX_TOKEN,
       setMapboxToken: (token) => set({ mapboxToken: token }),
       isAuthenticated: !!localStorage.getItem('tracktruck_token'),
-      setAuthenticated: (status) => set({ isAuthenticated: status }),
+      user: null,
+      setAuthenticated: (status, user = null) => set({ isAuthenticated: status, user }),
       mapboxPromptOpen: false,
       openMapboxPrompt: () => set({ mapboxPromptOpen: true }),
       closeMapboxPrompt: () => set({ mapboxPromptOpen: false }),
@@ -29,6 +38,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         mapboxToken: state.mapboxToken,
         isAuthenticated: state.isAuthenticated,
+        user: state.user,
       }),
       merge: (persisted: any, current) => ({
         ...current,

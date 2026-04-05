@@ -1,6 +1,6 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Map, LayoutDashboard, Truck, LogOut, Loader2 } from "lucide-react";
+import { Map, LayoutDashboard, Truck, LogOut, Loader2, ShieldCheck } from "lucide-react";
 import { useAuthMe, getAuthMeQueryKey } from "@workspace/api-client-react";
 import { useAppStore } from "@/store/use-app-store";
 
@@ -21,7 +21,9 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
   });
 
   useEffect(() => {
-    if (!isLoading && (isError || !user)) {
+    if (!isLoading && !isError && user) {
+      setAuthenticated(true, user as any);
+    } else if (!isLoading && (isError || !user)) {
       localStorage.removeItem('tracktruck_token');
       setAuthenticated(false);
       setLocation("/login");
@@ -51,6 +53,10 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
     { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
     { label: "Create Route", href: "/admin/routes/new", icon: Map },
   ];
+
+  if (user.role === 'super_admin' || user.role === 'admin') {
+    navItems.push({ label: "Clients", href: "/admin/super", icon: ShieldCheck });
+  }
 
   return (
     <div className="h-screen overflow-hidden bg-background flex flex-col md:flex-row">

@@ -7,8 +7,12 @@
  */
 
 export * from "./activateRouteResponse";
+export * from "./addAllowedEmailRequest";
+export * from "./addAllowedEmailRequestRole";
+export * from "./addAllowedEmailRequestRouteLimit";
+export * from "./allowedEmail";
+export * from "./allowedEmailRole";
 export * from "./authResponse";
-export * from "./createPaymentRequest";
 export * from "./createRouteRequest";
 export * from "./createRouteRequestSpeedProfileItem";
 export * from "./createStopRequest";
@@ -25,11 +29,6 @@ export * from "./liveSnapshotResponseStatus";
 export * from "./loginRequest";
 export * from "./messageResponse";
 export * from "./paginatedRoutes";
-export * from "./paymentCallbackRequest";
-export * from "./paymentCallbackRequestProviderPayload";
-export * from "./paymentCallbackRequestStatus";
-export * from "./paymentOrderResponse";
-export * from "./paymentOrderResponseStatus";
 export * from "./publicStopInfo";
 export * from "./publicTrackResponse";
 export * from "./publicTrackResponseStatus";
@@ -43,8 +42,11 @@ export * from "./routeStop";
 export * from "./signupRequest";
 export * from "./simulationStateResponse";
 export * from "./simulationStateResponseStatus";
+export * from "./updateAllowedEmailRequest";
+export * from "./updateAllowedEmailRequestRouteLimit";
 export * from "./updateRouteRequest";
 export * from "./updateRouteRequestSpeedProfileItem";
 export * from "./updateStopRequest";
 export * from "./userProfile";
+export * from "./userProfileRole";
 export * from "./verifyEmailRequest";

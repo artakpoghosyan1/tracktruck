@@ -19,7 +19,8 @@
     "express": "^5",
     "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.3",
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",

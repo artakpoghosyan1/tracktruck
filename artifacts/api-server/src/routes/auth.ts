@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, and, gt } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
-import { db, usersTable, oauthAccountsTable, refreshTokensTable } from "@workspace/db";
+import { db, usersTable, oauthAccountsTable, refreshTokensTable, allowedEmailsTable } from "@workspace/db";
 import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody, AuthForgotPasswordBody, AuthVerifyEmailBody } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
@@ -18,19 +18,33 @@ const router: IRouter = Router();
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function userPayload(user: { id: number; email: string; name: string; emailVerified: boolean; createdAt: Date }) {
+function userPayload(user: { 
+  id: number; 
+  email: string; 
+  name: string; 
+  emailVerified: boolean; 
+  role: string; 
+  createdAt: Date;
+  isPaid?: boolean;
+  routeLimit?: number;
+  usedRoutes?: number;
+}) {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     emailVerified: user.emailVerified,
+    role: user.role,
     createdAt: user.createdAt.toISOString(),
+    isPaid: user.isPaid ?? true,
+    routeLimit: user.routeLimit ?? 25,
+    usedRoutes: user.usedRoutes ?? 0,
   };
 }
 
-async function issueTokenPair(userId: number, email: string) {
-  const accessToken = signAccessToken(userId, email);
-  const refreshToken = signRefreshToken(userId, email);
+async function issueTokenPair(userId: number, email: string, role: string) {
+  const accessToken = signAccessToken(userId, email, role);
+  const refreshToken = signRefreshToken(userId, email, role);
 
   await db.insert(refreshTokensTable).values({
     userId,
@@ -45,25 +59,49 @@ async function issueTokenPair(userId: number, email: string) {
 
 router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res) => {
   const { email, password, name } = req.body as { email: string; password: string; name: string };
+  const lowerEmail = email.toLowerCase();
 
-  const existing = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  const existing = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, lowerEmail)).limit(1);
   if (existing.length > 0) {
     res.status(409).json({ error: "conflict", message: "An account with this email already exists" });
     return;
   }
 
+  let role = "user";
+  let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
+  if (lowerEmail === "artakpoghosyan1@gmail.com") {
+    role = "super_admin";
+  } else {
+    const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, lowerEmail)).limit(1);
+    if (!allowed) {
+      res.status(403).json({ error: "forbidden", message: "This email is not allowed to sign up. Please contact the administrator." });
+      return;
+    }
+    if (!allowed.isPaid) {
+      res.status(402).json({ error: "payment_required", message: "This email is authorized but currently unpaid. Please contact the administrator." });
+      return;
+    }
+    role = allowed.role;
+    allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
+  }
+
   const passwordHash = await bcrypt.hash(password, 10);
-  const [user] = await db.insert(usersTable).values({ email, passwordHash, name, emailVerified: false }).returning();
+  const [user] = await db.insert(usersTable).values({ email: lowerEmail, passwordHash, name, emailVerified: false, role }).returning();
 
-  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
+  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email, user.role);
 
-  res.status(201).json({ accessToken, refreshToken, user: userPayload(user) });
+  res.status(201).json({ 
+    accessToken, 
+    refreshToken, 
+    user: userPayload({ ...user, ...allowedData }) 
+  });
 });
 
 router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) => {
   const { email, password } = req.body as { email: string; password: string };
+  const lowerEmail = email.toLowerCase();
 
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, lowerEmail)).limit(1);
   if (!user || !user.passwordHash) {
     res.status(401).json({ error: "unauthorized", message: "Invalid email or password" });
     return;
@@ -75,9 +113,39 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
     return;
   }
 
-  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
+  let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
+  // Permission Check: ensure email is still in allowed_emails (except for root)
+  if (lowerEmail !== "artakpoghosyan1@gmail.com") {
+    const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, lowerEmail)).limit(1);
+    if (!allowed) {
+      res.status(403).json({ error: "forbidden", message: "Your access has been revoked. Please contact the administrator." });
+      return;
+    }
+    if (!allowed.isPaid) {
+      res.status(402).json({ error: "payment_required", message: "Your account is currently unpaid. Please contact the administrator." });
+      return;
+    }
+    if (allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
+      res.status(403).json({ error: "quota_exceeded", message: "Your route limit has been reached. Please contact the administrator to upgrade your tier." });
+      return;
+    }
+    allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
+    // Sync role if it changed in allowed_emails
+    if (user.role !== allowed.role) {
+      await db.update(usersTable).set({ role: allowed.role }).where(eq(usersTable.id, user.id));
+      user.role = allowed.role;
+    }
+  }
 
-  res.json({ accessToken, refreshToken, user: userPayload(user) });
+  // Ensure root super admin role is preserved and synced
+  if (user.email === "artakpoghosyan1@gmail.com" && user.role !== "super_admin") {
+    await db.update(usersTable).set({ role: "super_admin" }).where(eq(usersTable.id, user.id));
+    user.role = "super_admin";
+  }
+
+  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email, user.role);
+
+  res.json({ accessToken, refreshToken, user: userPayload({ ...user, ...allowedData }) });
 });
 
 router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res) => {
@@ -102,11 +170,12 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     const ticket = await client.verifyIdToken({ idToken, audience: googleClientId });
     const payload = ticket.getPayload();
     if (!payload) throw new Error("Empty Google token payload");
-    googleEmail = payload["email"];
+    googleEmail = payload["email"]?.toLowerCase();
     googleName = payload["name"] ?? payload["email"];
     googleUserId = payload["sub"];
     googleEmailVerified = payload["email_verified"] === true;
-  } catch {
+  } catch (err) {
+    console.error("Google verifyIdToken error:", err);
     res.status(401).json({ error: "unauthorized", message: "Invalid Google ID token" });
     return;
   }
@@ -133,25 +202,71 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
   if (existingOAuth) {
     // Known Google account — load the linked local user
     const [linked] = await db.select().from(usersTable).where(eq(usersTable.id, existingOAuth.userId)).limit(1);
-    if (!linked) {
-      res.status(500).json({ error: "internal_error", message: "Linked user account not found" });
-      return;
-    }
     user = linked;
+    
+    // Permission Check: ensure email is still in allowed_emails (except for root)
+    let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
+    if (user.email !== "artakpoghosyan1@gmail.com") {
+      const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, user.email)).limit(1);
+      if (!allowed) {
+        res.status(403).json({ error: "forbidden", message: "Your access has been revoked. Please contact the administrator." });
+        return;
+      }
+      if (!allowed.isPaid) {
+        res.status(402).json({ error: "payment_required", message: "Your account is currently unpaid. Please contact the administrator." });
+        return;
+      }
+      if (allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
+        res.status(403).json({ error: "quota_exceeded", message: "Your route limit has been reached. Please contact the administrator to upgrade your tier." });
+        return;
+      }
+      allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
+      // Sync role if it changed in allowed_emails
+      if (user.role !== allowed.role) {
+        await db.update(usersTable).set({ role: allowed.role }).where(eq(usersTable.id, user.id));
+        user.role = allowed.role;
+      }
+    }
+
+    // Safety check: ensure root super admin role is preserved
+    if (user.email === "artakpoghosyan1@gmail.com" && user.role !== "super_admin") {
+      await db.update(usersTable).set({ role: "super_admin" }).where(eq(usersTable.id, user.id));
+      user.role = "super_admin";
+    }
+
+    const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email, user.role);
+    res.json({ accessToken, refreshToken, user: userPayload({ ...user, ...allowedData }) });
+    return;
   } else {
     // New Google login — find or create user by email, then link the oauth account.
-    // Only link by email when Google has verified the address (prevents account takeover).
     if (!googleEmailVerified) {
       res.status(401).json({ error: "unauthorized", message: "Google account email is not verified" });
       return;
     }
+
+    let role = "user";
+    if (googleEmail === "artakpoghosyan1@gmail.com") {
+      role = "super_admin";
+    } else {
+      const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, googleEmail)).limit(1);
+      if (!allowed) {
+        res.status(403).json({ error: "forbidden", message: "This email is not allowed to log in. Please contact the administrator." });
+        return;
+      }
+      role = allowed.role;
+    }
     const [byEmail] = await db.select().from(usersTable).where(eq(usersTable.email, googleEmail)).limit(1);
     if (byEmail) {
       user = byEmail;
+      // Update role if it changed in allowed_emails or if it's the root super admin
+      if (user.role !== role) {
+        await db.update(usersTable).set({ role }).where(eq(usersTable.id, user.id));
+        user.role = role;
+      }
     } else {
       [user] = await db
         .insert(usersTable)
-        .values({ email: googleEmail, name: googleName!, emailVerified: true })
+        .values({ email: googleEmail, name: googleName!, emailVerified: true, role })
         .returning();
     }
     // Race-safe: onConflictDoNothing handles concurrent duplicate inserts gracefully
@@ -162,9 +277,13 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     }).onConflictDoNothing();
   }
 
-  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email);
+  const { accessToken, refreshToken } = await issueTokenPair(user.id, user.email, user.role);
+  
+  // Fetch allowed data for new user/google login to include in payload
+  const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, user.email)).limit(1);
+  const allowedRes = allowed ? { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes } : { isPaid: true, routeLimit: 25, usedRoutes: 0 };
 
-  res.json({ accessToken, refreshToken, user: userPayload(user) });
+  res.json({ accessToken, refreshToken, user: userPayload({ ...user, ...allowedRes }) });
 });
 
 router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, res) => {
@@ -214,7 +333,7 @@ router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, re
     .set({ revoked: true })
     .where(eq(refreshTokensTable.id, stored.id));
 
-  const { accessToken: newAccessToken, refreshToken: newRefreshToken } = await issueTokenPair(user.id, user.email);
+  const { accessToken: newAccessToken, refreshToken: newRefreshToken } = await issueTokenPair(user.id, user.email, user.role);
 
   res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken, user: userPayload(user) });
 });
@@ -248,7 +367,35 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
     res.status(404).json({ error: "not_found", message: "User not found" });
     return;
   }
-  res.json(userPayload(user));
+
+  // Permission Check: ensure revoked users are kicked out immediately on next auth check
+  let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
+  if (user.email !== "artakpoghosyan1@gmail.com") {
+    const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, user.email)).limit(1);
+    if (!allowed) {
+      res.status(403).json({ error: "forbidden", message: "Your access has been revoked." });
+      return;
+    }
+    if (!allowed.isPaid) {
+      res.status(402).json({ error: "payment_required", message: "Your account is currently unpaid." });
+      return;
+    }
+    if (allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
+      res.status(403).json({ error: "quota_exceeded", message: "Your route limit has been reached." });
+      return;
+    }
+    allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
+    // Sync role if it changed in allowed_emails
+    if (user.role !== allowed.role) {
+      await db.update(usersTable).set({ role: allowed.role }).where(eq(usersTable.id, user.id));
+      user.role = allowed.role;
+    }
+  }
+
+  res.json(userPayload({ 
+    ...user, 
+    ...allowedData
+  }));
 });
 
 // Stub: password reset — email sending not yet implemented

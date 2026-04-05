@@ -22,10 +22,8 @@ export interface RouteDetail {
   speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;
   estimatedDurationS: number;
-  paymentStatus?: string | null;
   shareToken?: string | null;
   shareLinkActive: boolean;
-  lastActivationDate?: Date | null;
   stops: RouteStop[];
   createdAt: Date;
   updatedAt: Date;

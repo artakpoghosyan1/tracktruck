@@ -263,6 +263,12 @@ export default function RouteBuilder() {
   const resumeMut = useResumeRoute();
   const [simActionLoading, setSimActionLoading] = useState<string | null>(null);
 
+  const [errorDialog, setErrorDialog] = useState<{ open: boolean; type: any; message: string }>({
+    open: false,
+    type: "generic",
+    message: ""
+  });
+
   const handleSimAction = async (action: 'start' | 'pause' | 'resume') => {
     if (!routeId) return;
     setSimActionLoading(action);
@@ -271,8 +277,13 @@ export default function RouteBuilder() {
       if (action === 'pause') await pauseMut.mutateAsync({ id: routeId });
       if (action === 'resume') await resumeMut.mutateAsync({ id: routeId });
       await refetchRoute();
-    } catch {
-      toast({ title: "Error", description: `Failed to ${action} simulation.`, variant: "destructive" });
+    } catch (err: any) {
+      const errorData = err.response?.data;
+      if (err.response?.status === 403 && errorData?.error === 'quota_exceeded') {
+        setErrorDialog({ open: true, type: "quota_exceeded", message: errorData?.message });
+      } else {
+        toast({ title: "Error", description: `Failed to ${action} simulation. ${errorData?.message || ""}`, variant: "destructive" });
+      }
     } finally {
       setSimActionLoading(null);
     }
@@ -651,8 +662,13 @@ export default function RouteBuilder() {
         setLocation('/admin');
       }
     } catch (err: any) {
-      const msg = err?.data?.message || err?.message || "Failed to save route";
-      toast({ title: "Save failed", description: msg, variant: "destructive" });
+      const errorData = err.response?.data;
+      if (err.response?.status === 403 && errorData?.error === 'quota_exceeded') {
+        setErrorDialog({ open: true, type: "quota_exceeded", message: errorData?.message });
+      } else {
+        const msg = errorData?.message || err?.message || "Failed to save route";
+        toast({ title: "Save failed", description: msg, variant: "destructive" });
+      }
     } finally {
       setIsSaving(false);
     }

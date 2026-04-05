@@ -10,19 +10,20 @@ export const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days in ms
 export interface JwtPayload {
   sub: number;
   email: string;
+  role: string;
   type: "access" | "refresh";
   jti?: string; // unique token ID; always present on refresh tokens
 }
 
-export function signAccessToken(userId: number, email: string): string {
-  return jwt.sign({ sub: userId, email, type: "access" } as JwtPayload, JWT_SECRET, {
+export function signAccessToken(userId: number, email: string, role: string): string {
+  return jwt.sign({ sub: userId, email, role, type: "access" } as JwtPayload, JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRES,
   });
 }
 
-export function signRefreshToken(userId: number, email: string): string {
+export function signRefreshToken(userId: number, email: string, role: string): string {
   return jwt.sign(
-    { sub: userId, email, type: "refresh", jti: crypto.randomUUID() } as JwtPayload,
+    { sub: userId, email, role, type: "refresh", jti: crypto.randomUUID() } as JwtPayload,
     JWT_SECRET,
     { expiresIn: REFRESH_TOKEN_EXPIRES },
   );

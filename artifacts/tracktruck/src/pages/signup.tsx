@@ -4,6 +4,7 @@ import { Truck, Mail, Lock, User, ArrowRight, Loader2 } from "lucide-react";
 import { useAuthSignup } from "@workspace/api-client-react";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
+import { FriendlyErrorDialog } from "@/components/common/FriendlyErrorDialog";
 
 export default function Signup() {
   const [name, setName] = useState("");
@@ -12,6 +13,12 @@ export default function Signup() {
   const [, setLocation] = useLocation();
   const { setAuthenticated } = useAppStore();
   const { toast } = useToast();
+  
+  const [errorDialog, setErrorDialog] = useState<{ open: boolean; type: any; message: string }>({
+    open: false,
+    type: "generic",
+    message: ""
+  });
 
   const signupMutation = useAuthSignup({
     mutation: {
@@ -22,9 +29,21 @@ export default function Signup() {
         setLocation("/admin");
       },
       onError: (err: any) => {
+        const errorData = err.response?.data;
+        const status = err.response?.status;
+
+        if (status === 402 || status === 403) {
+          setErrorDialog({ 
+            open: true, 
+            type: status === 402 ? "payment_required" : "unauthorized", 
+            message: errorData?.message 
+          });
+          return;
+        }
+
         toast({ 
-          title: "Signup failed", 
-          description: err?.response?.data?.message || "An error occurred",
+          title: "Setup failed", 
+          description: errorData?.message || "Registration failed. This email might already be used or is not yet authorized.",
           variant: "destructive"
         });
       }
@@ -127,6 +146,13 @@ export default function Signup() {
           </div>
         </div>
       </div>
+      
+      <FriendlyErrorDialog 
+        open={errorDialog.open} 
+        onOpenChange={(open) => setErrorDialog(curr => ({ ...curr, open }))}
+        errorType={errorDialog.type}
+        message={errorDialog.message}
+      />
     </div>
   );
 }

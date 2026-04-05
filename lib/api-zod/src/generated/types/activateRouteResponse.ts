@@ -10,6 +10,4 @@ export interface ActivateRouteResponse {
   routeId: number;
   status: string;
   shareToken: string;
-  paymentId: number;
-  paymentStatus: string;
 }

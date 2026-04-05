@@ -41,6 +41,7 @@ export const AuthLoginResponse = zod.object({
     email: zod.string(),
     name: zod.string(),
     emailVerified: zod.boolean(),
+    role: zod.enum(["super_admin", "admin", "user"]),
     createdAt: zod.date(),
   }),
 });
@@ -60,6 +61,7 @@ export const AuthGoogleResponse = zod.object({
     email: zod.string(),
     name: zod.string(),
     emailVerified: zod.boolean(),
+    role: zod.enum(["super_admin", "admin", "user"]),
     createdAt: zod.date(),
   }),
 });
@@ -79,6 +81,7 @@ export const AuthRefreshResponse = zod.object({
     email: zod.string(),
     name: zod.string(),
     emailVerified: zod.boolean(),
+    role: zod.enum(["super_admin", "admin", "user"]),
     createdAt: zod.date(),
   }),
 });
@@ -98,6 +101,7 @@ export const AuthMeResponse = zod.object({
   email: zod.string(),
   name: zod.string(),
   emailVerified: zod.boolean(),
+  role: zod.enum(["super_admin", "admin", "user"]),
   createdAt: zod.date(),
 });
 
@@ -639,4 +643,73 @@ export const GetPublicTrackStateResponse = zod.object({
   bearing: zod.number().nullish(),
   speedKmh: zod.number().optional(),
   atStopName: zod.string().nullish(),
+});
+
+/**
+ * @summary List all allowed emails and their roles
+ */
+export const ListAllowedEmailsResponseItem = zod.object({
+  id: zod.number(),
+  email: zod.string(),
+  role: zod.enum(["super_admin", "admin", "user"]),
+  isPaid: zod.boolean(),
+  routeLimit: zod.number(),
+  usedRoutes: zod.number(),
+  createdAt: zod.date(),
+});
+export const ListAllowedEmailsResponse = zod.array(
+  ListAllowedEmailsResponseItem,
+);
+
+/**
+ * @summary Add a new email to the allowed list
+ */
+export const addAllowedEmailBodyRoleDefault = `user`;
+export const addAllowedEmailBodyIsPaidDefault = true;
+export const addAllowedEmailBodyRouteLimitDefault = 25;
+
+export const AddAllowedEmailBody = zod.object({
+  email: zod.string().email(),
+  role: zod
+    .enum(["super_admin", "admin", "user"])
+    .default(addAllowedEmailBodyRoleDefault),
+  isPaid: zod.boolean().default(addAllowedEmailBodyIsPaidDefault),
+  routeLimit: zod
+    .union([zod.literal(25), zod.literal(50), zod.literal(100)])
+    .default(addAllowedEmailBodyRouteLimitDefault),
+});
+
+/**
+ * @summary Remove an email from the allowed list
+ */
+export const RemoveAllowedEmailParams = zod.object({
+  email: zod.coerce.string().email(),
+});
+
+export const RemoveAllowedEmailResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
+ * @summary Update settings for an allowed email
+ */
+export const UpdateAllowedEmailParams = zod.object({
+  email: zod.coerce.string().email(),
+});
+
+export const UpdateAllowedEmailBody = zod.object({
+  isPaid: zod.boolean().optional(),
+  routeLimit: zod
+    .union([zod.literal(25), zod.literal(50), zod.literal(100)])
+    .optional(),
+});
+
+export const UpdateAllowedEmailResponse = zod.object({
+  id: zod.number(),
+  email: zod.string(),
+  role: zod.enum(["super_admin", "admin", "user"]),
+  isPaid: zod.boolean(),
+  routeLimit: zod.number(),
+  usedRoutes: zod.number(),
+  createdAt: zod.date(),
 });

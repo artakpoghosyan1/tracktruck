@@ -4,6 +4,7 @@ import { verifyToken } from "../lib/jwt";
 export interface AuthUser {
   id: number;
   email: string;
+  role: string;
 }
 
 export interface AuthRequest extends Request {
@@ -30,7 +31,7 @@ export function requireAuth(): RequestHandler {
         return;
       }
       const authReq = req as AuthRequest;
-      authReq.user = { id: payload.sub, email: payload.email };
+      authReq.user = { id: payload.sub, email: payload.email, role: payload.role || 'user' };
       // Keep legacy aliases so existing route handlers continue to work
       authReq.userId = payload.sub;
       authReq.userEmail = payload.email;
@@ -38,5 +39,27 @@ export function requireAuth(): RequestHandler {
     } catch {
       res.status(401).json({ error: "unauthorized", message: "Invalid or expired token" });
     }
+  };
+}
+
+export function requireSuperAdmin(): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthRequest;
+    if (authReq.user?.role !== "super_admin") {
+      res.status(403).json({ error: "forbidden", message: "Super admin access required" });
+      return;
+    }
+    next();
+  };
+}
+
+export function requireAdmin(): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthRequest;
+    if (authReq.user?.role !== "super_admin" && authReq.user?.role !== "admin") {
+      res.status(403).json({ error: "forbidden", message: "Admin access required" });
+      return;
+    }
+    next();
   };
 }

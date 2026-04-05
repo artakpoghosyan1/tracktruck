@@ -3,7 +3,8 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { 
   Plus, Search, Play, Pause,
-  Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2, Eye
+  Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2, Eye,
+  BarChart3
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { 
@@ -15,12 +16,21 @@ import {
   ListRoutesStatus
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAppStore } from "@/store/use-app-store";
+import { FriendlyErrorDialog } from "@/components/common/FriendlyErrorDialog";
 
 export default function Dashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ListRoutesStatus | undefined>();
+  const { user } = useAppStore();
   const { toast } = useToast();
+  
+  const [errorDialog, setErrorDialog] = useState<{ open: boolean; type: any; message: string }>({
+    open: false,
+    type: "generic",
+    message: ""
+  });
 
   const { data, isLoading, refetch } = useListRoutes({
     page,
@@ -45,9 +55,14 @@ export default function Dashboard() {
         }
       }
       toast({ title: "Success", description: `Action ${action} completed.` });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Action failed";
-      toast({ title: "Error", description: message, variant: "destructive" });
+    } catch (e: any) {
+      const errorData = e.response?.data;
+      if (e.response?.status === 403 && errorData?.error === 'quota_exceeded') {
+        setErrorDialog({ open: true, type: "quota_exceeded", message: errorData?.message });
+      } else {
+        const message = errorData?.message || e.message || "Action failed";
+        toast({ title: "Error", description: message, variant: "destructive" });
+      }
     }
   };
 
@@ -80,6 +95,37 @@ export default function Dashboard() {
           Create Route
         </Link>
       </div>
+      
+      {user?.role === 'user' && (
+        <div className="bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/20 rounded-3xl p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden shadow-sm">
+          <div className="absolute top-0 right-0 p-8 opacity-5">
+            <BarChart3 className="w-48 h-48" />
+          </div>
+          <div className="flex items-center gap-6 relative z-10">
+            <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center">
+              <BarChart3 className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-foreground">Route Usage Status</h3>
+              <p className="text-sm text-muted-foreground">You have used {(user as any).usedRoutes} out of {(user as any).routeLimit} routes in your current plan.</p>
+            </div>
+          </div>
+          <div className="w-full md:w-1/3 space-y-3 relative z-10">
+            <div className="flex justify-between items-end">
+              <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">{(user as any).routeLimit} Route Tier</span>
+              <span className={`text-sm font-bold ${((user as any).usedRoutes || 0) >= (user as any).routeLimit ? 'text-destructive' : 'text-primary'}`}>
+                {Math.max(0, (user as any).routeLimit - ((user as any).usedRoutes || 0))} left
+              </span>
+            </div>
+            <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden border border-border/50">
+              <div 
+                className={`h-full transition-all rounded-full ${((user as any).usedRoutes || 0) >= (user as any).routeLimit ? 'bg-destructive' : 'bg-primary'}`}
+                style={{ width: `${Math.min(100, (((user as any).usedRoutes || 0) / (user as any).routeLimit) * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-card rounded-2xl shadow-sm border border-border/60 overflow-hidden">
         <div className="p-4 border-b border-border/50 bg-muted/10 flex flex-col sm:flex-row gap-4">
@@ -248,6 +294,13 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      <FriendlyErrorDialog 
+        open={errorDialog.open} 
+        onOpenChange={(open) => setErrorDialog(curr => ({ ...curr, open }))}
+        errorType={errorDialog.type}
+        message={errorDialog.message}
+      />
     </AdminLayout>
   );
 }

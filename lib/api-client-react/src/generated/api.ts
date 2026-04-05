@@ -18,8 +18,9 @@ import type {
 
 import type {
   ActivateRouteResponse,
+  AddAllowedEmailRequest,
+  AllowedEmail,
   AuthResponse,
-  CreatePaymentRequest,
   CreateRouteRequest,
   CreateStopRequest,
   ErrorResponse,
@@ -31,14 +32,13 @@ import type {
   LoginRequest,
   MessageResponse,
   PaginatedRoutes,
-  PaymentCallbackRequest,
-  PaymentOrderResponse,
   PublicTrackResponse,
   RefreshRequest,
   RouteDetail,
   RouteStop,
   SignupRequest,
   SimulationStateResponse,
+  UpdateAllowedEmailRequest,
   UpdateRouteRequest,
   UpdateStopRequest,
   UserProfile,
@@ -1990,265 +1990,6 @@ export const useRecalculateRoute = <
 };
 
 /**
- * @summary Create a payment order
- */
-export const getCreatePaymentUrl = () => {
-  return `/api/payments/create`;
-};
-
-export const createPayment = async (
-  createPaymentRequest: CreatePaymentRequest,
-  options?: RequestInit,
-): Promise<PaymentOrderResponse> => {
-  return customFetch<PaymentOrderResponse>(getCreatePaymentUrl(), {
-    ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(createPaymentRequest),
-  });
-};
-
-export const getCreatePaymentMutationOptions = <
-  TError = ErrorType<unknown>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof createPayment>>,
-    TError,
-    { data: BodyType<CreatePaymentRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof createPayment>>,
-  TError,
-  { data: BodyType<CreatePaymentRequest> },
-  TContext
-> => {
-  const mutationKey = ["createPayment"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof createPayment>>,
-    { data: BodyType<CreatePaymentRequest> }
-  > = (props) => {
-    const { data } = props ?? {};
-
-    return createPayment(data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type CreatePaymentMutationResult = NonNullable<
-  Awaited<ReturnType<typeof createPayment>>
->;
-export type CreatePaymentMutationBody = BodyType<CreatePaymentRequest>;
-export type CreatePaymentMutationError = ErrorType<unknown>;
-
-/**
- * @summary Create a payment order
- */
-export const useCreatePayment = <
-  TError = ErrorType<unknown>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof createPayment>>,
-    TError,
-    { data: BodyType<CreatePaymentRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof createPayment>>,
-  TError,
-  { data: BodyType<CreatePaymentRequest> },
-  TContext
-> => {
-  return useMutation(getCreatePaymentMutationOptions(options));
-};
-
-/**
- * @summary Payment provider callback
- */
-export const getPaymentCallbackUrl = () => {
-  return `/api/payments/callback`;
-};
-
-export const paymentCallback = async (
-  paymentCallbackRequest: PaymentCallbackRequest,
-  options?: RequestInit,
-): Promise<MessageResponse> => {
-  return customFetch<MessageResponse>(getPaymentCallbackUrl(), {
-    ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(paymentCallbackRequest),
-  });
-};
-
-export const getPaymentCallbackMutationOptions = <
-  TError = ErrorType<unknown>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof paymentCallback>>,
-    TError,
-    { data: BodyType<PaymentCallbackRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof paymentCallback>>,
-  TError,
-  { data: BodyType<PaymentCallbackRequest> },
-  TContext
-> => {
-  const mutationKey = ["paymentCallback"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof paymentCallback>>,
-    { data: BodyType<PaymentCallbackRequest> }
-  > = (props) => {
-    const { data } = props ?? {};
-
-    return paymentCallback(data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type PaymentCallbackMutationResult = NonNullable<
-  Awaited<ReturnType<typeof paymentCallback>>
->;
-export type PaymentCallbackMutationBody = BodyType<PaymentCallbackRequest>;
-export type PaymentCallbackMutationError = ErrorType<unknown>;
-
-/**
- * @summary Payment provider callback
- */
-export const usePaymentCallback = <
-  TError = ErrorType<unknown>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof paymentCallback>>,
-    TError,
-    { data: BodyType<PaymentCallbackRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof paymentCallback>>,
-  TError,
-  { data: BodyType<PaymentCallbackRequest> },
-  TContext
-> => {
-  return useMutation(getPaymentCallbackMutationOptions(options));
-};
-
-/**
- * @summary Get payment status
- */
-export const getGetPaymentUrl = (id: number) => {
-  return `/api/payments/${id}`;
-};
-
-export const getPayment = async (
-  id: number,
-  options?: RequestInit,
-): Promise<PaymentOrderResponse> => {
-  return customFetch<PaymentOrderResponse>(getGetPaymentUrl(id), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getGetPaymentQueryKey = (id: number) => {
-  return [`/api/payments/${id}`] as const;
-};
-
-export const getGetPaymentQueryOptions = <
-  TData = Awaited<ReturnType<typeof getPayment>>,
-  TError = ErrorType<unknown>,
->(
-  id: number,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getPayment>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getGetPaymentQueryKey(id);
-
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getPayment>>> = ({
-    signal,
-  }) => getPayment(id, { signal, ...requestOptions });
-
-  return {
-    queryKey,
-    queryFn,
-    enabled: !!id,
-    ...queryOptions,
-  } as UseQueryOptions<
-    Awaited<ReturnType<typeof getPayment>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type GetPaymentQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getPayment>>
->;
-export type GetPaymentQueryError = ErrorType<unknown>;
-
-/**
- * @summary Get payment status
- */
-
-export function useGetPayment<
-  TData = Awaited<ReturnType<typeof getPayment>>,
-  TError = ErrorType<unknown>,
->(
-  id: number,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getPayment>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetPaymentQueryOptions(id, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
  * @summary Get public route data by share token
  */
 export const getGetPublicTrackUrl = (token: string) => {
@@ -2514,3 +2255,336 @@ export function useGetPublicTrackState<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List all allowed emails and their roles
+ */
+export const getListAllowedEmailsUrl = () => {
+  return `/api/admin/allowed-emails`;
+};
+
+export const listAllowedEmails = async (
+  options?: RequestInit,
+): Promise<AllowedEmail[]> => {
+  return customFetch<AllowedEmail[]>(getListAllowedEmailsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAllowedEmailsQueryKey = () => {
+  return [`/api/admin/allowed-emails`] as const;
+};
+
+export const getListAllowedEmailsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAllowedEmails>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAllowedEmails>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAllowedEmailsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAllowedEmails>>
+  > = ({ signal }) => listAllowedEmails({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAllowedEmails>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAllowedEmailsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAllowedEmails>>
+>;
+export type ListAllowedEmailsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List all allowed emails and their roles
+ */
+
+export function useListAllowedEmails<
+  TData = Awaited<ReturnType<typeof listAllowedEmails>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAllowedEmails>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAllowedEmailsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Add a new email to the allowed list
+ */
+export const getAddAllowedEmailUrl = () => {
+  return `/api/admin/allowed-emails`;
+};
+
+export const addAllowedEmail = async (
+  addAllowedEmailRequest: AddAllowedEmailRequest,
+  options?: RequestInit,
+): Promise<AllowedEmail> => {
+  return customFetch<AllowedEmail>(getAddAllowedEmailUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(addAllowedEmailRequest),
+  });
+};
+
+export const getAddAllowedEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addAllowedEmail>>,
+    TError,
+    { data: BodyType<AddAllowedEmailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addAllowedEmail>>,
+  TError,
+  { data: BodyType<AddAllowedEmailRequest> },
+  TContext
+> => {
+  const mutationKey = ["addAllowedEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addAllowedEmail>>,
+    { data: BodyType<AddAllowedEmailRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return addAllowedEmail(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddAllowedEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addAllowedEmail>>
+>;
+export type AddAllowedEmailMutationBody = BodyType<AddAllowedEmailRequest>;
+export type AddAllowedEmailMutationError = ErrorType<void>;
+
+/**
+ * @summary Add a new email to the allowed list
+ */
+export const useAddAllowedEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addAllowedEmail>>,
+    TError,
+    { data: BodyType<AddAllowedEmailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof addAllowedEmail>>,
+  TError,
+  { data: BodyType<AddAllowedEmailRequest> },
+  TContext
+> => {
+  return useMutation(getAddAllowedEmailMutationOptions(options));
+};
+
+/**
+ * @summary Remove an email from the allowed list
+ */
+export const getRemoveAllowedEmailUrl = (email: string) => {
+  return `/api/admin/allowed-emails/${email}`;
+};
+
+export const removeAllowedEmail = async (
+  email: string,
+  options?: RequestInit,
+): Promise<MessageResponse> => {
+  return customFetch<MessageResponse>(getRemoveAllowedEmailUrl(email), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getRemoveAllowedEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeAllowedEmail>>,
+    TError,
+    { email: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeAllowedEmail>>,
+  TError,
+  { email: string },
+  TContext
+> => {
+  const mutationKey = ["removeAllowedEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeAllowedEmail>>,
+    { email: string }
+  > = (props) => {
+    const { email } = props ?? {};
+
+    return removeAllowedEmail(email, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveAllowedEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeAllowedEmail>>
+>;
+
+export type RemoveAllowedEmailMutationError = ErrorType<void>;
+
+/**
+ * @summary Remove an email from the allowed list
+ */
+export const useRemoveAllowedEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeAllowedEmail>>,
+    TError,
+    { email: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof removeAllowedEmail>>,
+  TError,
+  { email: string },
+  TContext
+> => {
+  return useMutation(getRemoveAllowedEmailMutationOptions(options));
+};
+
+/**
+ * @summary Update settings for an allowed email
+ */
+export const getUpdateAllowedEmailUrl = (email: string) => {
+  return `/api/admin/allowed-emails/${email}`;
+};
+
+export const updateAllowedEmail = async (
+  email: string,
+  updateAllowedEmailRequest: UpdateAllowedEmailRequest,
+  options?: RequestInit,
+): Promise<AllowedEmail> => {
+  return customFetch<AllowedEmail>(getUpdateAllowedEmailUrl(email), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateAllowedEmailRequest),
+  });
+};
+
+export const getUpdateAllowedEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAllowedEmail>>,
+    TError,
+    { email: string; data: BodyType<UpdateAllowedEmailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAllowedEmail>>,
+  TError,
+  { email: string; data: BodyType<UpdateAllowedEmailRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateAllowedEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAllowedEmail>>,
+    { email: string; data: BodyType<UpdateAllowedEmailRequest> }
+  > = (props) => {
+    const { email, data } = props ?? {};
+
+    return updateAllowedEmail(email, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAllowedEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAllowedEmail>>
+>;
+export type UpdateAllowedEmailMutationBody =
+  BodyType<UpdateAllowedEmailRequest>;
+export type UpdateAllowedEmailMutationError = ErrorType<void>;
+
+/**
+ * @summary Update settings for an allowed email
+ */
+export const useUpdateAllowedEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAllowedEmail>>,
+    TError,
+    { email: string; data: BodyType<UpdateAllowedEmailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateAllowedEmail>>,
+  TError,
+  { email: string; data: BodyType<UpdateAllowedEmailRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateAllowedEmailMutationOptions(options));
+};
