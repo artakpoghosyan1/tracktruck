@@ -127,6 +127,7 @@ export interface RouteListItem {
   shareLinkActive: boolean;
   createdAt: string;
   updatedAt: string;
+  updateCount?: number | null;
 }
 
 export type RouteDetailStatus =
@@ -175,6 +176,7 @@ export interface RouteDetail {
   stops: RouteStop[];
   createdAt: string;
   updatedAt: string;
+  updateCount?: number | null;
 }
 
 export interface PaginatedRoutes {
@@ -300,6 +302,7 @@ export const AllowedEmailRole = {
 export interface AllowedEmail {
   id: number;
   email: string;
+  name?: string | null;
   role: AllowedEmailRole;
   isPaid: boolean;
   routeLimit: number;
@@ -316,52 +319,38 @@ export const AddAllowedEmailRequestRole = {
   user: "user",
 } as const;
 
-export type AddAllowedEmailRequestRouteLimit =
-  (typeof AddAllowedEmailRequestRouteLimit)[keyof typeof AddAllowedEmailRequestRouteLimit];
-
-export const AddAllowedEmailRequestRouteLimit = {
-  NUMBER_25: 25,
-  NUMBER_50: 50,
-  NUMBER_100: 100,
-} as const;
-
 export interface AddAllowedEmailRequest {
   email: string;
+  name?: string;
   role?: AddAllowedEmailRequestRole;
   isPaid?: boolean;
-  routeLimit?: AddAllowedEmailRequestRouteLimit;
+  routeLimit?: number;
 }
 
-export type UpdateAllowedEmailRequestRouteLimit =
-  (typeof UpdateAllowedEmailRequestRouteLimit)[keyof typeof UpdateAllowedEmailRequestRouteLimit];
+export type UpdateAllowedEmailRequestRole =
+  (typeof UpdateAllowedEmailRequestRole)[keyof typeof UpdateAllowedEmailRequestRole];
 
-export const UpdateAllowedEmailRequestRouteLimit = {
-  NUMBER_25: 25,
-  NUMBER_50: 50,
-  NUMBER_100: 100,
+export const UpdateAllowedEmailRequestRole = {
+  super_admin: "super_admin",
+  admin: "admin",
+  user: "user",
 } as const;
 
 export interface UpdateAllowedEmailRequest {
+  name?: string;
   isPaid?: boolean;
-  routeLimit?: UpdateAllowedEmailRequestRouteLimit;
+  routeLimit?: number;
+  usedRoutes?: number;
+  role?: UpdateAllowedEmailRequestRole;
 }
 
 export type ListRoutesParams = {
   page?: number;
-  page_size?: ListRoutesPageSize;
+  page_size?: number;
   status?: ListRoutesStatus;
   search?: string;
   sort?: ListRoutesSort;
 };
-
-export type ListRoutesPageSize =
-  (typeof ListRoutesPageSize)[keyof typeof ListRoutesPageSize];
-
-export const ListRoutesPageSize = {
-  NUMBER_10: 10,
-  NUMBER_25: 25,
-  NUMBER_50: 50,
-} as const;
 
 export type ListRoutesStatus =
   (typeof ListRoutesStatus)[keyof typeof ListRoutesStatus];

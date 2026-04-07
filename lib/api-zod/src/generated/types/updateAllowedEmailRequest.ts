@@ -5,9 +5,12 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { UpdateAllowedEmailRequestRouteLimit } from "./updateAllowedEmailRequestRouteLimit";
+import type { UpdateAllowedEmailRequestRole } from "./updateAllowedEmailRequestRole";
 
 export interface UpdateAllowedEmailRequest {
+  name?: string;
   isPaid?: boolean;
-  routeLimit?: UpdateAllowedEmailRequestRouteLimit;
+  routeLimit?: number;
+  usedRoutes?: number;
+  role?: UpdateAllowedEmailRequestRole;
 }

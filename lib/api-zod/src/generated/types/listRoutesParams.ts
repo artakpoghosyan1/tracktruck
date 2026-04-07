@@ -5,13 +5,12 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { ListRoutesPageSize } from "./listRoutesPageSize";
 import type { ListRoutesSort } from "./listRoutesSort";
 import type { ListRoutesStatus } from "./listRoutesStatus";
 
 export type ListRoutesParams = {
   page?: number;
-  page_size?: ListRoutesPageSize;
+  page_size?: number;
   status?: ListRoutesStatus;
   search?: string;
   sort?: ListRoutesSort;

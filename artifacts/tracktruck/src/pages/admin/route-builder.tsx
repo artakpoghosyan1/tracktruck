@@ -19,6 +19,12 @@ import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
 import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, useStartRoute, usePauseRoute, useResumeRoute } from "@workspace/api-client-react";
+import { 
+  Tooltip, 
+  TooltipContent, 
+  TooltipProvider, 
+  TooltipTrigger 
+} from "@/components/ui/tooltip";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
 
@@ -241,6 +247,12 @@ export default function RouteBuilder() {
   const routeLocked = (isLiveRoute && !routeChangeMode) || isCompleted;
   const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
   const liveSpeedKmh = liveSnapshot?.speedKmh ?? null;
+
+  const { user } = useAppStore();
+  const isUser = user?.role === 'user';
+  const updateCount = (existingRoute as any)?.updateCount ?? 0;
+  const remainingChanges = Math.max(0, 1 - updateCount);
+  const modificationsRestricted = isUser && isLiveRoute && remainingChanges === 0;
 
   const [copied, setCopied] = useState(false);
   const copyShareUrl = () => {
@@ -729,6 +741,19 @@ export default function RouteBuilder() {
             </div>
           )}
 
+          {/* Modifications tracking badge (only for live or completed routes) */}
+          {(isLiveRoute || isCompleted) && (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-xl animate-in fade-in slide-in-from-right-4 ${modificationsRestricted ? 'bg-red-50 border-red-100 text-red-600' : (isCompleted ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-blue-50 border-blue-100 text-blue-600')}`}>
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <div className="flex flex-col -space-y-0.5">
+                <span className="text-[10px] font-bold uppercase tracking-tight">{isUser ? 'Client Quota' : 'Admin Maintenance'}</span>
+                <span className="text-[11px] font-medium leading-none">
+                  {isUser ? (modificationsRestricted ? 'Modifications Locked' : (isCompleted ? 'Route Locked' : `${remainingChanges} change remaining`)) : 'Unlimited edits'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Copy share URL */}
           {routeId && existingRoute?.shareToken && (
             <button
@@ -891,13 +916,27 @@ export default function RouteBuilder() {
                     </div>
                   </div>
                   {!isCompleted && (
-                    <button
-                      onClick={() => setRouteChangeMode(true)}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm transition-colors"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Change Route
-                    </button>
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => setRouteChangeMode(true)}
+                            disabled={modificationsRestricted}
+                            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm transition-colors disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed group relative"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Change Route
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                          <p className="text-xs font-medium leading-relaxed">
+                            {modificationsRestricted 
+                              ? "Activated routes can only be modified once."
+                              : "Edit the current route path and stops"}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
                 </div>
               ) : (

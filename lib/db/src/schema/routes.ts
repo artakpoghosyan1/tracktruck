@@ -23,6 +23,7 @@ export const routesTable = pgTable("routes", {
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updateCount: integer("update_count").notNull().default(0),
 });
 
 export const insertRouteSchema = createInsertSchema(routesTable).omit({ id: true, createdAt: true, updatedAt: true, deletedAt: true });

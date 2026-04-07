@@ -128,9 +128,7 @@ export const listRoutesQuerySortDefault = `newest`;
 
 export const ListRoutesQueryParams = zod.object({
   page: zod.coerce.number().default(listRoutesQueryPageDefault),
-  page_size: zod
-    .union([zod.literal(10), zod.literal(25), zod.literal(50)])
-    .default(listRoutesQueryPageSizeDefault),
+  page_size: zod.coerce.number().default(listRoutesQueryPageSizeDefault),
   status: zod
     .enum(["draft", "ready", "in_progress", "paused", "completed", "expired"])
     .optional(),
@@ -160,6 +158,7 @@ export const ListRoutesResponse = zod.object({
       shareLinkActive: zod.boolean(),
       createdAt: zod.date(),
       updatedAt: zod.date(),
+      updateCount: zod.number().nullish(),
     }),
   ),
   total: zod.number(),
@@ -257,6 +256,7 @@ export const GetRouteResponse = zod.object({
   ),
   createdAt: zod.date(),
   updatedAt: zod.date(),
+  updateCount: zod.number().nullish(),
 });
 
 /**
@@ -345,6 +345,7 @@ export const UpdateRouteResponse = zod.object({
   ),
   createdAt: zod.date(),
   updatedAt: zod.date(),
+  updateCount: zod.number().nullish(),
 });
 
 /**
@@ -651,6 +652,7 @@ export const GetPublicTrackStateResponse = zod.object({
 export const ListAllowedEmailsResponseItem = zod.object({
   id: zod.number(),
   email: zod.string(),
+  name: zod.string().nullish(),
   role: zod.enum(["super_admin", "admin", "user"]),
   isPaid: zod.boolean(),
   routeLimit: zod.number(),
@@ -670,13 +672,12 @@ export const addAllowedEmailBodyRouteLimitDefault = 25;
 
 export const AddAllowedEmailBody = zod.object({
   email: zod.string().email(),
+  name: zod.string().optional(),
   role: zod
     .enum(["super_admin", "admin", "user"])
     .default(addAllowedEmailBodyRoleDefault),
   isPaid: zod.boolean().default(addAllowedEmailBodyIsPaidDefault),
-  routeLimit: zod
-    .union([zod.literal(25), zod.literal(50), zod.literal(100)])
-    .default(addAllowedEmailBodyRouteLimitDefault),
+  routeLimit: zod.number().default(addAllowedEmailBodyRouteLimitDefault),
 });
 
 /**
@@ -698,15 +699,17 @@ export const UpdateAllowedEmailParams = zod.object({
 });
 
 export const UpdateAllowedEmailBody = zod.object({
+  name: zod.string().optional(),
   isPaid: zod.boolean().optional(),
-  routeLimit: zod
-    .union([zod.literal(25), zod.literal(50), zod.literal(100)])
-    .optional(),
+  routeLimit: zod.number().optional(),
+  usedRoutes: zod.number().optional(),
+  role: zod.enum(["super_admin", "admin", "user"]).optional(),
 });
 
 export const UpdateAllowedEmailResponse = zod.object({
   id: zod.number(),
   email: zod.string(),
+  name: zod.string().nullish(),
   role: zod.enum(["super_admin", "admin", "user"]),
   isPaid: zod.boolean(),
   routeLimit: zod.number(),

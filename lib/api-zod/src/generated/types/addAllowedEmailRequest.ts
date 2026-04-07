@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AddAllowedEmailRequestRole } from "./addAllowedEmailRequestRole";
-import type { AddAllowedEmailRequestRouteLimit } from "./addAllowedEmailRequestRouteLimit";
 
 export interface AddAllowedEmailRequest {
   email: string;
+  name?: string;
   role?: AddAllowedEmailRequestRole;
   isPaid?: boolean;
-  routeLimit?: AddAllowedEmailRequestRouteLimit;
+  routeLimit?: number;
 }

@@ -10,6 +10,7 @@ import type { AllowedEmailRole } from "./allowedEmailRole";
 export interface AllowedEmail {
   id: number;
   email: string;
+  name?: string | null;
   role: AllowedEmailRole;
   isPaid: boolean;
   routeLimit: number;

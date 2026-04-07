@@ -82,6 +82,7 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
       truckSpeedKmh: r.truckSpeedKmh,
       shareToken: shareLink?.token ?? null,
       shareLinkActive: shareLink?.active ?? false,
+      updateCount: r.updateCount,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     };
@@ -210,6 +211,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
       sortOrder: s.sortOrder,
       createdAt: s.createdAt.toISOString(),
     })),
+    updateCount: route.updateCount,
     createdAt: route.createdAt.toISOString(),
     updatedAt: route.updatedAt.toISOString(),
   });
@@ -232,6 +234,16 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
 
   if (existing.status === "completed") {
     res.status(400).json({ error: "bad_request", message: "Route is completed and cannot be edited. Reset it first." });
+    return;
+  }
+
+  // Single update limit for clients on STARTED routes (in_progress or paused)
+  const isStarted = ["in_progress", "paused"].includes(existing.status);
+  if (isStarted && authReq.user?.role === "user" && (existing.updateCount || 0) >= 1) {
+    res.status(403).json({ 
+      error: "forbidden", 
+      message: "This route has already been modified once while in progress. Further changes are restricted. Please contact an administrator." 
+    });
     return;
   }
 
@@ -283,6 +295,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
       distanceM,
       estimatedDurationS,
       updatedAt: new Date(),
+      ...(isStarted && { updateCount: (existing.updateCount || 0) + 1 }),
     })
     .where(eq(routesTable.id, id))
     .returning();
@@ -375,6 +388,11 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
     .values({ routeId, name, lat, lng, durationMinutes, sortOrder })
     .returning();
 
+  // Increment updateCount if not draft
+  if (route.status !== "draft") {
+    await db.update(routesTable).set({ updateCount: route.updateCount + 1 }).where(eq(routesTable.id, routeId));
+  }
+
   res.status(201).json({
     id: stop.id,
     routeId: stop.routeId,
@@ -411,6 +429,16 @@ router.put(
       return;
     }
 
+    // Single update limit for clients on STARTED routes
+    const isStarted = ["in_progress", "paused"].includes(route.status);
+    if (isStarted && authReq.user?.role === "user" && (route.updateCount || 0) >= 1) {
+      res.status(403).json({ 
+        error: "forbidden", 
+        message: "This route has already been modified once while in progress. Step edits are restricted." 
+      });
+      return;
+    }
+
     const { name, lat, lng, durationMinutes, sortOrder } = req.body as {
       name?: string;
       lat?: number;
@@ -434,6 +462,11 @@ router.put(
     if (!updated) {
       res.status(404).json({ error: "not_found", message: "Stop not found" });
       return;
+    }
+
+    // Increment updateCount if started
+    if (isStarted) {
+      await db.update(routesTable).set({ updateCount: (route.updateCount || 0) + 1 }).where(eq(routesTable.id, routeId));
     }
 
     res.json({
@@ -470,7 +503,21 @@ router.delete("/routes/:id/stops/:stopId", validate({ params: DeleteStopParams }
     return;
   }
 
+  // Single update limit for clients on activated routes
+  if (route.status !== "draft" && authReq.user?.role === "user" && route.updateCount >= 1) {
+    res.status(403).json({ 
+      error: "forbidden", 
+      message: "This route has already been modified once after activation. Stop removals are restricted." 
+    });
+    return;
+  }
+
   await db.delete(routeStopsTable).where(and(eq(routeStopsTable.id, stopId), eq(routeStopsTable.routeId, routeId)));
+
+  // Increment updateCount if not draft
+  if (route.status !== "draft") {
+    await db.update(routesTable).set({ updateCount: route.updateCount + 1 }).where(eq(routesTable.id, routeId));
+  }
 
   res.status(204).send();
 });

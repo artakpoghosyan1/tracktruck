@@ -20,4 +20,5 @@ export interface RouteListItem {
   shareLinkActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+  updateCount?: number | null;
 }

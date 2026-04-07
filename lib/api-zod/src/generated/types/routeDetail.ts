@@ -27,4 +27,5 @@ export interface RouteDetail {
   stops: RouteStop[];
   createdAt: Date;
   updatedAt: Date;
+  updateCount?: number | null;
 }
