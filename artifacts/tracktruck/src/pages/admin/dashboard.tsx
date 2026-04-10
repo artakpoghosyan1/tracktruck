@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { 
   Plus, Search, Play, Pause,
   Trash2, Link as LinkIcon, ExternalLink, Edit, Loader2, Eye,
-  BarChart3
+  BarChart3, Zap
 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { 
@@ -13,6 +13,8 @@ import {
   usePauseRoute, 
   useResumeRoute, 
   useDeleteRoute,
+  useActivateRoute,
+  useAuthMe,
   ListRoutesStatus
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
@@ -23,8 +25,20 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ListRoutesStatus | undefined>();
-  const { user } = useAppStore();
+  const { user, setAuthenticated } = useAppStore();
   const { toast } = useToast();
+
+  const { data: meData, refetch: refetchMe } = useAuthMe({
+    query: {
+      enabled: !!user,
+    }
+  } as any);
+
+  useEffect(() => {
+    if (meData) {
+      setAuthenticated(true, meData as any);
+    }
+  }, [meData, setAuthenticated]);
   
   const [errorDialog, setErrorDialog] = useState<{ open: boolean; type: any; message: string }>({
     open: false,
@@ -39,13 +53,20 @@ export default function Dashboard() {
     status: statusFilter,
   });
 
-  const startMut = useStartRoute({ mutation: { onSuccess: () => refetch() }});
-  const pauseMut = usePauseRoute({ mutation: { onSuccess: () => refetch() }});
-  const resumeMut = useResumeRoute({ mutation: { onSuccess: () => refetch() }});
-  const deleteMut = useDeleteRoute({ mutation: { onSuccess: () => refetch() }});
+  const onActionSuccess = () => {
+    refetch();
+    refetchMe();
+  };
 
-  const handleAction = async (action: 'start'|'pause'|'resume'|'delete', id: number) => {
+  const activateMut = useActivateRoute({ mutation: { onSuccess: onActionSuccess }});
+  const startMut = useStartRoute({ mutation: { onSuccess: onActionSuccess }});
+  const pauseMut = usePauseRoute({ mutation: { onSuccess: onActionSuccess }});
+  const resumeMut = useResumeRoute({ mutation: { onSuccess: onActionSuccess }});
+  const deleteMut = useDeleteRoute({ mutation: { onSuccess: onActionSuccess }});
+
+  const handleAction = async (action: 'activate'|'start'|'pause'|'resume'|'delete', id: number) => {
     try {
+      if (action === 'activate') await activateMut.mutateAsync({ id });
       if (action === 'start') await startMut.mutateAsync({ id });
       if (action === 'pause') await pauseMut.mutateAsync({ id });
       if (action === 'resume') await resumeMut.mutateAsync({ id });
@@ -208,6 +229,15 @@ export default function Dashboard() {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {route.status === 'draft' && (
+                          <button
+                            onClick={() => handleAction('activate', route.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-primary hover:bg-primary/90 rounded-lg transition-colors shadow-sm"
+                            title="Activate route"
+                          >
+                            <Zap className="w-3.5 h-3.5 fill-current" /> Activate
+                          </button>
+                        )}
                         {route.status !== 'completed' && (
                           <Link
                             href={`/admin/routes/${route.id}/edit`}

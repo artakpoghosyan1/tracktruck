@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ilike, desc, asc, isNull, sql, count } from "drizzle-orm";
-import { db, routesTable, routeStopsTable, shareLinksTable } from "@workspace/db";
+import { db, routesTable, routeStopsTable, shareLinksTable, simulationStatesTable } from "@workspace/db";
 import { broadcastToToken, broadcastToRoute } from "./ws";
 import {
   ListRoutesQueryParams,
@@ -93,7 +93,7 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
 
 router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh = 60, polyline = [], speedProfile = [] } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh = 60, polyline = [], speedProfile = [], customDurationS } = req.body as {
     name: string;
     startLat: number;
     startLng: number;
@@ -102,6 +102,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     truckSpeedKmh?: number;
     polyline?: number[][];
     speedProfile?: { distanceM: number; speedKmh: number }[];
+    customDurationS?: number | null;
   };
 
   const { totalPolylineDistance } = await import("../lib/geo");
@@ -138,6 +139,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
       speedProfile,
       distanceM,
       estimatedDurationS,
+      customDurationS: customDurationS ?? null,
       status: "draft",
     })
     .returning();
@@ -212,6 +214,9 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
       createdAt: s.createdAt.toISOString(),
     })),
     updateCount: route.updateCount,
+    customDurationS: route.customDurationS,
+    customDurationEnabled: route.customDurationEnabled,
+    showSpeedPublic: route.showSpeedPublic,
     createdAt: route.createdAt.toISOString(),
     updatedAt: route.updatedAt.toISOString(),
   });
@@ -247,7 +252,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     return;
   }
 
-  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh, polyline, speedProfile } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedKmh, polyline, speedProfile, customDurationS } = req.body as {
     name?: string;
     startLat?: number;
     startLng?: number;
@@ -256,6 +261,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     truckSpeedKmh?: number;
     polyline?: number[][];
     speedProfile?: { distanceM: number; speedKmh: number }[];
+    customDurationS?: number | null;
   };
 
   const newPolyline = polyline ?? existing.polyline ?? [];
@@ -281,27 +287,64 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     estimatedDurationS = dur;
   }
 
-  const [updated] = await db
-    .update(routesTable)
-    .set({
-      ...(name !== undefined && { name }),
-      ...(startLat !== undefined && { startLat }),
-      ...(startLng !== undefined && { startLng }),
-      ...(endLat !== undefined && { endLat }),
-      ...(endLng !== undefined && { endLng }),
-      ...(truckSpeedKmh !== undefined && { truckSpeedKmh }),
-      ...(polyline !== undefined && { polyline }),
-      ...(speedProfile !== undefined && { speedProfile }),
-      distanceM,
-      estimatedDurationS,
-      updatedAt: new Date(),
-      ...(isStarted && { updateCount: (existing.updateCount || 0) + 1 }),
-    })
-    .where(eq(routesTable.id, id))
-    .returning();
+    const hasPointChanges = 
+      (startLat !== undefined && startLat !== existing.startLat) ||
+      (startLng !== undefined && startLng !== existing.startLng) ||
+      (endLat !== undefined && endLat !== existing.endLat) ||
+      (endLng !== undefined && endLng !== existing.endLng);
+    
+    // Stringify polyline for deep comparison check if provided
+    const polylineChanged = polyline !== undefined && JSON.stringify(polyline) !== JSON.stringify(existing.polyline);
+    const nameChanged = name !== undefined && name !== existing.name;
+    const speedChanged = truckSpeedKmh !== undefined && truckSpeedKmh !== existing.truckSpeedKmh;
+    const durationChanged = customDurationS !== undefined && customDurationS !== existing.customDurationS;
 
-  // If route is live, notify all viewers that the route has changed so they refetch
-  if (["in_progress", "paused"].includes(updated.status)) {
+    const anythingChanged = hasPointChanges || polylineChanged || nameChanged || speedChanged || durationChanged;
+
+    const [updated] = await db
+      .update(routesTable)
+      .set({
+        ...(name !== undefined && { name }),
+        ...(startLat !== undefined && { startLat }),
+        ...(startLng !== undefined && { startLng }),
+        ...(endLat !== undefined && { endLat }),
+        ...(endLng !== undefined && { endLng }),
+        ...(truckSpeedKmh !== undefined && { truckSpeedKmh }),
+        ...(polyline !== undefined && { polyline }),
+        ...(speedProfile !== undefined && { speedProfile }),
+        ...(customDurationS !== undefined && { customDurationS: customDurationS ?? null }),
+        distanceM,
+        estimatedDurationS,
+        updatedAt: new Date(),
+        ...(isStarted && anythingChanged && { updateCount: (existing.updateCount || 0) + 1 }),
+      })
+      .where(eq(routesTable.id, id))
+      .returning();
+
+  // If route is activated, check if the route geometry changed and reset simulation
+  if (["ready", "in_progress", "paused"].includes(updated.status)) {
+    const routeGeometryChanged =
+      (startLat !== undefined && startLat !== existing.startLat) ||
+      (startLng !== undefined && startLng !== existing.startLng) ||
+      (endLat !== undefined && endLat !== existing.endLat) ||
+      (endLng !== undefined && endLng !== existing.endLng) ||
+      polyline !== undefined;
+
+    if (routeGeometryChanged) {
+      // Reset simulation state so the truck starts from the new start point
+      await db.update(simulationStatesTable)
+        .set({
+          effectiveElapsedMs: 0,
+          distanceTraveledM: 0,
+          progressPercent: 0,
+          startedAt: updated.status === "in_progress" ? new Date() : null,
+          pausedAt: updated.status === "paused" ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(simulationStatesTable.routeId, updated.id));
+    }
+
+    // Notify all viewers that the route has changed so they refetch
     const routeUpdatedMsg = { type: "route_updated", routeId: updated.id };
     broadcastToRoute(updated.id, routeUpdatedMsg);
     // Also broadcast to public share-link channels
@@ -355,6 +398,139 @@ router.delete("/routes/:id", validate({ params: DeleteRouteParams }), async (req
   res.status(204).send();
 });
 
+// Dedicated speed-only update — does NOT count as a route change, unlimited for all users
+router.patch("/routes/:id/speed", async (req, res) => {
+  const authReq = req as unknown as AuthRequest;
+  const id = parseInt(req.params["id"] as string);
+
+  const [existing] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, id), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!existing) {
+    res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  const { truckSpeedKmh, customDurationS, customDurationEnabled, showSpeedPublic } = req.body as {
+    truckSpeedKmh?: number;
+    customDurationS?: number | null;
+    customDurationEnabled?: boolean;
+    showSpeedPublic?: boolean;
+  };
+
+  const newSpeed = truckSpeedKmh ?? existing.truckSpeedKmh;
+  const newPolyline = existing.polyline ?? [];
+  const newSpeedProfile = (existing.speedProfile as { distanceM: number; speedKmh: number }[] | null) ?? [];
+  const { totalPolylineDistance } = await import("../lib/geo");
+  const distanceM = (newPolyline as number[][]).length > 1 ? totalPolylineDistance(newPolyline as number[][]) : existing.distanceM;
+
+  let estimatedDurationS = newSpeed > 0 ? (distanceM / 1000 / newSpeed) * 3600 : existing.estimatedDurationS;
+  if (newSpeedProfile.length > 0) {
+    let dur = 0;
+    let profDist = 0;
+    for (const seg of newSpeedProfile) {
+      if (seg.speedKmh > 0 && seg.distanceM > 0) {
+        dur += seg.distanceM / (seg.speedKmh * 1000 / 3600);
+        profDist += seg.distanceM;
+      }
+    }
+    const remaining = distanceM - profDist;
+    if (remaining > 0 && newSpeed > 0) {
+      dur += remaining / (newSpeed * 1000 / 3600);
+    }
+    estimatedDurationS = dur;
+  }
+
+  const [updated] = await db
+    .update(routesTable)
+    .set({
+      ...(truckSpeedKmh !== undefined && { truckSpeedKmh }),
+      ...(customDurationS !== undefined && { customDurationS }),
+      ...(customDurationEnabled !== undefined && { customDurationEnabled }),
+      ...(showSpeedPublic !== undefined && { showSpeedPublic }),
+      distanceM,
+      estimatedDurationS,
+      updatedAt: new Date(),
+      // NOTE: updateCount is NOT incremented — speed changes are unlimited
+    })
+    .where(eq(routesTable.id, id))
+    .returning();
+
+  // When speed/duration settings change on a LIVE route: recalculate
+  // effectiveElapsedMs so the truck stays at its current position instead of
+  // jumping.  The simulation engine computes:
+  //   virtualElapsedS = totalElapsedS × speedMultiplier
+  // We need:  oldTotal × oldMult  =  newTotal × newMult
+  //   →  newTotal = oldTotal × (oldMult / newMult)
+  if (["in_progress", "paused"].includes(updated.status)) {
+    const [simState] = await db.select().from(simulationStatesTable)
+      .where(eq(simulationStatesTable.routeId, id)).limit(1);
+
+    if (simState) {
+      // Calculate current total elapsed milliseconds
+      let totalElapsedMs = simState.effectiveElapsedMs ?? 0;
+      if (updated.status === "in_progress" && simState.startedAt) {
+        totalElapsedMs += Date.now() - simState.startedAt.getTime();
+      }
+
+      // Fetch stops so we can compute naturalTimeS accurately
+      const dbStops = await db.select().from(routeStopsTable)
+        .where(eq(routeStopsTable.routeId, id));
+      const totalStopWaitS = dbStops.reduce((sum, s) => sum + s.durationMinutes * 60, 0);
+      const naturalTimeS = updated.estimatedDurationS + totalStopWaitS;
+
+      // Old multiplier (what was active BEFORE this update)
+      const oldEnabled = existing.customDurationEnabled;
+      const oldDuration = existing.customDurationS;
+      const oldMult = (oldEnabled && oldDuration && oldDuration > 0 && naturalTimeS > 0)
+        ? naturalTimeS / oldDuration
+        : 1.0;
+
+      // New multiplier (what is now active AFTER this update)
+      const newEnabled = updated.customDurationEnabled;
+      const newDuration = updated.customDurationS;
+      const newMult = (newEnabled && newDuration && newDuration > 0 && naturalTimeS > 0)
+        ? naturalTimeS / newDuration
+        : 1.0;
+
+      // Adjust elapsed time so truck stays at the same position
+      const adjustedMs = Math.round(totalElapsedMs * (oldMult / newMult));
+
+      await db.update(simulationStatesTable)
+        .set({
+          effectiveElapsedMs: adjustedMs,
+          startedAt: updated.status === "in_progress" ? new Date() : simState.startedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(simulationStatesTable.routeId, id));
+    }
+  }
+
+  // Always notify viewers so public pages pick up showSpeedPublic changes
+  const routeUpdatedMsg = { type: "route_updated", routeId: updated.id };
+  broadcastToRoute(updated.id, routeUpdatedMsg);
+  const activeLinks = await db
+    .select()
+    .from(shareLinksTable)
+    .where(and(eq(shareLinksTable.routeId, updated.id), eq(shareLinksTable.active, true)));
+  for (const sl of activeLinks) {
+    broadcastToToken(sl.token, routeUpdatedMsg);
+  }
+
+  res.json({
+    id: updated.id,
+    truckSpeedKmh: updated.truckSpeedKmh,
+    customDurationS: updated.customDurationS,
+    customDurationEnabled: updated.customDurationEnabled,
+    showSpeedPublic: updated.showSpeedPublic,
+    estimatedDurationS: updated.estimatedDurationS,
+    distanceM: updated.distanceM,
+  });
+});
+
 router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: CreateStopBody }), async (req, res) => {
   const authReq = req as AuthRequest;
   const routeId = parseInt(req.params["id"] as string);
@@ -388,9 +564,17 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
     .values({ routeId, name, lat, lng, durationMinutes, sortOrder })
     .returning();
 
-  // Increment updateCount if not draft
-  if (route.status !== "draft") {
-    await db.update(routesTable).set({ updateCount: route.updateCount + 1 }).where(eq(routesTable.id, routeId));
+  // Notify live viewers so position recalculates with the new stop
+  if (["in_progress", "paused"].includes(route.status)) {
+    const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
+    broadcastToRoute(route.id, routeUpdatedMsg);
+    const activeLinks = await db
+      .select()
+      .from(shareLinksTable)
+      .where(and(eq(shareLinksTable.routeId, route.id), eq(shareLinksTable.active, true)));
+    for (const sl of activeLinks) {
+      broadcastToToken(sl.token, routeUpdatedMsg);
+    }
   }
 
   res.status(201).json({
@@ -429,15 +613,6 @@ router.put(
       return;
     }
 
-    // Single update limit for clients on STARTED routes
-    const isStarted = ["in_progress", "paused"].includes(route.status);
-    if (isStarted && authReq.user?.role === "user" && (route.updateCount || 0) >= 1) {
-      res.status(403).json({ 
-        error: "forbidden", 
-        message: "This route has already been modified once while in progress. Step edits are restricted." 
-      });
-      return;
-    }
 
     const { name, lat, lng, durationMinutes, sortOrder } = req.body as {
       name?: string;
@@ -464,9 +639,17 @@ router.put(
       return;
     }
 
-    // Increment updateCount if started
-    if (isStarted) {
-      await db.update(routesTable).set({ updateCount: (route.updateCount || 0) + 1 }).where(eq(routesTable.id, routeId));
+    // Notify live viewers so position recalculates with new stop settings
+    if (["in_progress", "paused"].includes(route.status)) {
+      const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
+      broadcastToRoute(route.id, routeUpdatedMsg);
+      const activeLinks = await db
+        .select()
+        .from(shareLinksTable)
+        .where(and(eq(shareLinksTable.routeId, route.id), eq(shareLinksTable.active, true)));
+      for (const sl of activeLinks) {
+        broadcastToToken(sl.token, routeUpdatedMsg);
+      }
     }
 
     res.json({
@@ -503,20 +686,20 @@ router.delete("/routes/:id/stops/:stopId", validate({ params: DeleteStopParams }
     return;
   }
 
-  // Single update limit for clients on activated routes
-  if (route.status !== "draft" && authReq.user?.role === "user" && route.updateCount >= 1) {
-    res.status(403).json({ 
-      error: "forbidden", 
-      message: "This route has already been modified once after activation. Stop removals are restricted." 
-    });
-    return;
-  }
 
   await db.delete(routeStopsTable).where(and(eq(routeStopsTable.id, stopId), eq(routeStopsTable.routeId, routeId)));
 
-  // Increment updateCount if not draft
-  if (route.status !== "draft") {
-    await db.update(routesTable).set({ updateCount: route.updateCount + 1 }).where(eq(routesTable.id, routeId));
+  // Notify live viewers so the truck starts moving immediately
+  if (["in_progress", "paused"].includes(route.status)) {
+    const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
+    broadcastToRoute(route.id, routeUpdatedMsg);
+    const activeLinks = await db
+      .select()
+      .from(shareLinksTable)
+      .where(and(eq(shareLinksTable.routeId, route.id), eq(shareLinksTable.active, true)));
+    for (const sl of activeLinks) {
+      broadcastToToken(sl.token, routeUpdatedMsg);
+    }
   }
 
   res.status(204).send();

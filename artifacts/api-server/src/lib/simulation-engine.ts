@@ -251,30 +251,34 @@ function computePositionWithStops(
   sortedStops: StopEntry[],
   speedProfile: SpeedSegment[],
   fallbackSpeedKmh: number,
+  speedMultiplier: number = 1.0,
 ): PositionWithStop {
   let remainingS = totalElapsedS;
   let travelDistConsumedM = 0;
 
   for (const stop of sortedStops) {
     const legDistM = stop.distanceAlongPolylineM - travelDistConsumedM;
-    if (legDistM <= 0) continue; // stop is behind current position (shouldn't happen if sorted)
+    if (legDistM <= 0) continue;
 
-    // Time to drive from current position to this stop
+    // Time to drive this leg at natural speed
     const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
     const legTimeS = timeForDistance(legDistM, trimmedProfile, fallbackSpeedKmh);
+    // Real time for this leg = natural time / multiplier (faster multiplier = less real time)
+    const realLegTimeS = legTimeS / speedMultiplier;
 
-    if (remainingS < legTimeS) {
-      // Still driving toward this stop
-      const additionalDistM = computeDistanceWithSpeedProfile(remainingS, trimmedProfile, fallbackSpeedKmh);
+    if (remainingS < realLegTimeS) {
+      // Still driving toward this stop — scale remaining time by multiplier
+      const virtualDrivingS = remainingS * speedMultiplier;
+      const additionalDistM = computeDistanceWithSpeedProfile(virtualDrivingS, trimmedProfile, fallbackSpeedKmh);
       const pos = positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM);
       return { ...pos, atStopName: null };
     }
 
-    remainingS -= legTimeS;
+    remainingS -= realLegTimeS;
     travelDistConsumedM = stop.distanceAlongPolylineM;
 
+    // Stops ALWAYS take their full duration (not affected by multiplier)
     if (remainingS < stop.durationS) {
-      // Truck is currently at this stop, waiting
       const pos = positionAlongPolyline(polyline, stop.distanceAlongPolylineM);
       return { ...pos, atStopName: stop.name };
     }
@@ -284,7 +288,8 @@ function computePositionWithStops(
 
   // Past all stops — drive to destination
   const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
-  const additionalDistM = computeDistanceWithSpeedProfile(remainingS, trimmedProfile, fallbackSpeedKmh);
+  const virtualDrivingS = remainingS * speedMultiplier;
+  const additionalDistM = computeDistanceWithSpeedProfile(virtualDrivingS, trimmedProfile, fallbackSpeedKmh);
   const pos = positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM);
   return { ...pos, atStopName: null };
 }
@@ -348,12 +353,19 @@ async function tick() {
     const sortedStops: StopEntry[] = [...realStops, ...trafficStops]
       .sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
 
+    // Speed multiplier: only scales driving time, not stop waits.
+    // Total real duration = customDurationS (driving) + sum(stop durations)
+    const speedMultiplier = (route.customDurationEnabled && route.customDurationS && route.customDurationS > 0)
+      ? (route.estimatedDurationS / route.customDurationS)
+      : 1.0;
+
     const pos = computePositionWithStops(
       totalElapsedS,
       polyline,
       sortedStops,
       speedProfile,
       route.truckSpeedKmh,
+      speedMultiplier,
     );
 
     // -----------------------------------------------------------------------
@@ -442,7 +454,9 @@ async function tick() {
     const targetSpeedKmh = isAtAnyStop
       ? 0
       : Math.min(MAX_ALLOWED_SPEED_KMH, Math.max(0, baseSpeedKmh * fluctMult * combinedBrakeFactor));
-    const currentSpeedKmh = Math.round(targetSpeedKmh * rampFactor);
+    const currentSpeedKmh = route.customDurationS 
+      ? Math.round(targetSpeedKmh * rampFactor * speedMultiplier) 
+      : Math.round(targetSpeedKmh * rampFactor);
 
     // -----------------------------------------------------------------------
     // Display position (edge-offset for real named stops only)

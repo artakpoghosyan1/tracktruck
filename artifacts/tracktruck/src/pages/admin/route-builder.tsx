@@ -1,13 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import Map, { Marker, Source, Layer, MapRef, Popup } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
-  ArrowLeft, Save, Zap, Flag, GripVertical,
-  Plus, Trash2, Clock, Map as MapIcon, Settings,
-  MapPin, X, CheckCircle2, Loader2, Play, Pause,
-  Pencil, AlertTriangle, Gauge, Copy, Check
+    ArrowLeft, Save, Zap, Flag, GripVertical,
+    Plus, Trash2, MapPin, X, Loader2, Play, Pause,
+    Pencil, AlertTriangle, Gauge, Settings, Copy
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -19,11 +18,11 @@ import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
 import { useCreateRoute, useUpdateRoute, useGetRoute, useActivateRoute, useStartRoute, usePauseRoute, useResumeRoute } from "@workspace/api-client-react";
-import { 
-  Tooltip, 
-  TooltipContent, 
-  TooltipProvider, 
-  TooltipTrigger 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
 } from "@/components/ui/tooltip";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
@@ -74,6 +73,83 @@ function routeLabel(idx: number, option: RouteOption, allOptions: RouteOption[])
   if (option === fastest) return "Fastest";
   return `Alternative ${idx}`;
 }
+
+// Extracted component: manages its own 60fps rAF animation loop so only
+// this small tree re-renders on every frame, not the entire RouteBuilder.
+// Move outside main component and memoize to protect from parent re-renders
+const AnimatedTruckMarker = memo(({ snapshot }: {
+  snapshot: { lat: number; lng: number; bearing: number } | null;
+}) => {
+  const TICK_MS = 2000;
+  const [pos, setPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
+  const posRef = useRef<{ lat: number; lng: number; bearing: number } | null>(null);
+  const animRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (snapshot?.lat == null || snapshot?.lng == null) {
+      setPos(null);
+      posRef.current = null;
+      return;
+    }
+    const target = { lat: snapshot.lat, lng: snapshot.lng, bearing: snapshot.bearing };
+    
+    // If it's the first snapshot, jump to it immediately
+    if (!posRef.current) {
+      setPos(target);
+      posRef.current = target;
+      return;
+    }
+
+    const from = posRef.current;
+    const startTime = performance.now();
+    if (animRef.current != null) cancelAnimationFrame(animRef.current);
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / TICK_MS, 1);
+      
+      let bdiff = target.bearing - from.bearing;
+      if (bdiff > 180) bdiff -= 360;
+      if (bdiff < -180) bdiff += 360;
+
+      const p = {
+        lat: from.lat + (target.lat - from.lat) * t,
+        lng: from.lng + (target.lng - from.lng) * t,
+        bearing: from.bearing + bdiff * t,
+      };
+
+      posRef.current = p;
+      setPos(p);
+
+      if (t < 1) {
+        animRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    animRef.current = requestAnimationFrame(animate);
+    return () => { if (animRef.current != null) cancelAnimationFrame(animRef.current); };
+  }, [snapshot]);
+
+  if (!pos) return null;
+  return (
+    <Marker longitude={pos.lng} latitude={pos.lat} anchor="center">
+      <div className="relative flex items-center justify-center">
+        <div className="absolute w-12 h-12 rounded-full bg-primary/25 animate-ping" />
+        <div
+          className="relative z-10 drop-shadow-xl"
+          style={{ transform: `rotate(${pos.bearing}deg)` }}
+        >
+          <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
+            <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />
+            <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white" />
+          </svg>
+        </div>
+      </div>
+    </Marker>
+  );
+});
+
+AnimatedTruckMarker.displayName = 'AnimatedTruckMarker';
 
 function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, atStopName, countdownSec }: {
   stop: Stop; index: number;
@@ -148,6 +224,7 @@ export default function RouteBuilder() {
   const [stops, setStops] = useState<Stop[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [speedSaving, setSpeedSaving] = useState(false);
   const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
 
@@ -188,43 +265,17 @@ export default function RouteBuilder() {
     return () => clearInterval(id);
   }, [stopArrivalTime, atStopName, stops]);
 
-  // Smoothly interpolated marker position for the admin map view
-  const TICK_MS = 2000;
-  const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
-  const markerPosRef = useRef<{ lat: number; lng: number; bearing: number } | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (liveSnapshot?.lat == null || liveSnapshot?.lng == null) {
-      setMarkerPos(null);
-      markerPosRef.current = null;
-      return;
-    }
-    const target = { lat: liveSnapshot.lat, lng: liveSnapshot.lng, bearing: liveSnapshot.bearing };
-    const from = markerPosRef.current ?? target;
-    const startTime = performance.now();
-    if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current);
-    const animate = (now: number) => {
-      const t = Math.min((now - startTime) / TICK_MS, 1);
-      let bdiff = target.bearing - from.bearing;
-      if (bdiff > 180) bdiff -= 360;
-      if (bdiff < -180) bdiff += 360;
-      const pos = {
-        lat: from.lat + (target.lat - from.lat) * t,
-        lng: from.lng + (target.lng - from.lng) * t,
-        bearing: from.bearing + bdiff * t,
-      };
-      markerPosRef.current = pos;
-      setMarkerPos({ ...pos });
-      if (t < 1) animFrameRef.current = requestAnimationFrame(animate);
-    };
-    animFrameRef.current = requestAnimationFrame(animate);
-    return () => { if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current); };
-  }, [liveSnapshot]);
 
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
   const [routeChangeMode, setRouteChangeMode] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // Custom simulation duration
+  const [useCustomDuration, setUseCustomDuration] = useState(false);
+  const [customDurationMinutes, setCustomDurationMinutes] = useState(30);
+
+  // Speed visibility for public tracking page
+  const [showSpeedPublic, setShowSpeedPublic] = useState(true);
 
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
@@ -275,34 +326,50 @@ export default function RouteBuilder() {
   const resumeMut = useResumeRoute();
   const [simActionLoading, setSimActionLoading] = useState<string | null>(null);
 
-  const [errorDialog, setErrorDialog] = useState<{ open: boolean; type: any; message: string }>({
-    open: false,
-    type: "generic",
-    message: ""
-  });
 
   const handleSimAction = async (action: 'start' | 'pause' | 'resume') => {
     if (!routeId) return;
     setSimActionLoading(action);
     try {
-      if (action === 'start') await startMut.mutateAsync({ id: routeId });
-      if (action === 'pause') await pauseMut.mutateAsync({ id: routeId });
-      if (action === 'resume') await resumeMut.mutateAsync({ id: routeId });
+      if (action === 'start') {
+        // If we have local unsaved changes (status is ready), save them first
+        // We check if status is 'ready' to ensure we capture the final geometry
+        const status = existingRoute?.status;
+        if (status === 'ready') {
+          const payload = {
+            name: name.trim(),
+            startLat: start?.lat, startLng: start?.lng,
+            endLat: end?.lat, endLng: end?.lng,
+            truckSpeedKmh: 80,
+            polyline,
+            speedProfile,
+          };
+          await updateMut.mutateAsync({ id: routeId, data: payload });
+        }
+        await startMut.mutateAsync({ id: routeId });
+      } else if (action === 'pause') {
+        await pauseMut.mutateAsync({ id: routeId });
+      } else if (action === 'resume') {
+        await resumeMut.mutateAsync({ id: routeId });
+      }
       await refetchRoute();
     } catch (err: any) {
       const errorData = err.response?.data;
-      if (err.response?.status === 403 && errorData?.error === 'quota_exceeded') {
-        setErrorDialog({ open: true, type: "quota_exceeded", message: errorData?.message });
-      } else {
-        toast({ title: "Error", description: `Failed to ${action} simulation. ${errorData?.message || ""}`, variant: "destructive" });
-      }
+      toast({ title: "Error", description: `Failed to ${action} simulation. ${errorData?.message || ""}`, variant: "destructive" });
     } finally {
       setSimActionLoading(null);
     }
   };
 
+  const initializedRouteIdRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!existingRoute) return;
+    // Only initialize form fields ONCE per route — subsequent refetches
+    // (from WS, speed saves, etc.) should NOT re-set the form and cause blinking
+    if (initializedRouteIdRef.current === existingRoute.id) return;
+    initializedRouteIdRef.current = existingRoute.id;
+
     setName(existingRoute.name);
     setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
     setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
@@ -320,12 +387,49 @@ export default function RouteBuilder() {
       }]);
       setSelectedIdx(0);
     }
-  }, [existingRoute]); // Depend on existingRoute directly
+
+    // Custom duration: always start unchecked — user opens it manually when needed
+    // But always populate the saved value so it's there when they check the box
+    if (existingRoute.customDurationS) {
+      setCustomDurationMinutes(Math.round(existingRoute.customDurationS / 60));
+    }
+    const er = existingRoute as any;
+    setShowSpeedPublic(er.showSpeedPublic ?? true);
+  }, [existingRoute]);
 
   // --- Admin live WebSocket: show truck position when route is in_progress ---
+  // When paused, keep the last known snapshot so the marker stays visible.
   useEffect(() => {
-    if (!routeId || existingRoute?.status !== 'in_progress') {
+    const status = existingRoute?.status ?? '';
+
+    // Only clear snapshot for non-live statuses
+    if (!['in_progress', 'paused'].includes(status)) {
       setLiveSnapshot(null);
+    }
+
+    if (!routeId) return;
+
+    // For live routes (progress/paused) that were just loaded: fetch last known position immediately
+    // so the truck appears without waiting up to 2s for the next WS tick.
+    if (['in_progress', 'paused'].includes(status) && existingRoute?.shareToken) {
+      fetch(`/api/public/track/${existingRoute.shareToken}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data?.snapshot?.lat != null) {
+            setLiveSnapshot({
+              lat: data.snapshot.lat,
+              lng: data.snapshot.lng,
+              bearing: data.snapshot.bearing ?? 0,
+              speedKmh: data.snapshot.speedKmh ?? 0,
+              atStopName: data.snapshot.atStopName || null,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+
+    // Only connect WS when actively running or paused (stay connected for immediate resume)
+    if (!['in_progress', 'paused'].includes(status)) {
       return;
     }
 
@@ -344,13 +448,17 @@ export default function RouteBuilder() {
         try {
           const data = JSON.parse(e.data);
           if (data.lat !== undefined && data.lng !== undefined) {
-            setLiveSnapshot({
+            setLiveSnapshot(prev => ({
+              ...prev,
               lat: data.lat,
               lng: data.lng,
               bearing: data.bearing ?? 0,
               speedKmh: data.speedKmh ?? 0,
               atStopName: data.atStopName || null,
-            });
+            }));
+          } else if (data.type === "route_updated") {
+            initializedRouteIdRef.current = null;
+            refetchRoute();
           }
         } catch { }
       };
@@ -362,9 +470,12 @@ export default function RouteBuilder() {
     connect();
     return () => {
       clearTimeout(reconnectTimer);
-      if (ws) ws.close();
+      if (ws) {
+        ws.onclose = null; // prevent reconnection during unmount
+        ws.close();
+      }
     };
-  }, [routeId, existingRoute?.status]);
+  }, [routeId, existingRoute?.status, existingRoute?.shareToken]);
 
   // --- Draft persistence (new routes only) ---
   const DRAFT_KEY = 'tracktruck_route_draft';
@@ -416,19 +527,15 @@ export default function RouteBuilder() {
         let options: RouteOption[] = [];
 
         if (mapboxToken) {
-          // Mapbox returns up to 3 alternatives; enrich with OSRM speed profiles
-          const [mbOptions, osrmOptions] = await Promise.all([
-            fetchDirections(coords, mapboxToken),
-            fetchOsrmDirections(coords),
-          ]);
+          // Priority 1: Mapbox (fastest and most accurate for driving)
+          const mbOptions = await fetchDirections(coords, mapboxToken);
+
           if (mbOptions && mbOptions.length > 0) {
-            // Assign OSRM speed profiles by index (best-effort match)
-            options = mbOptions.map((opt, i) => ({
-              ...opt,
-              speedProfile: osrmOptions?.[i]?.speedProfile ?? osrmOptions?.[0]?.speedProfile ?? [],
-            }));
-          } else if (osrmOptions) {
-            options = osrmOptions;
+            options = mbOptions;
+          } else {
+            // Priority 2: OSRM Fallback (if Mapbox fails or finds no route)
+            const osrmOptions = await fetchOsrmDirections(coords);
+            if (osrmOptions) options = osrmOptions;
           }
         } else {
           // No Mapbox token: use OSRM only
@@ -633,6 +740,8 @@ export default function RouteBuilder() {
         truckSpeedKmh: 80,
         polyline,
         speedProfile,
+        // customDurationS is sent only on create; for existing routes, use Update Speed button
+        ...(!routeId && { customDurationS: useCustomDuration && customDurationMinutes > 0 ? customDurationMinutes * 60 : null }),
       };
 
       let savedRoute;
@@ -657,6 +766,11 @@ export default function RouteBuilder() {
 
       if (isActivate) {
         await activateMut.mutateAsync({ id: savedRoute.id });
+        // Keep only the selected route option, discard alternatives
+        setRouteOptions([routeOptions[selectedIdx]]);
+        setSelectedIdx(0);
+        // Reset init ref so if we redirect to the same route ID, the effect re-runs
+        initializedRouteIdRef.current = null;
         toast({ title: "Route Activated!", description: "Your route is ready. Press Start to begin tracking." });
         localStorage.removeItem('tracktruck_route_draft');
         // Redirect to the route's edit page so the Start button and controls become visible
@@ -666,6 +780,8 @@ export default function RouteBuilder() {
       } else if (isActivatedRoute) {
         // Already activated — save without redirecting
         toast({ title: "Route Saved", description: `"${savedRoute.name}" updated.` });
+        // Force the initialization effect to re-run and sync form state with new server data
+        initializedRouteIdRef.current = null;
         await refetchRoute();
       } else {
         // True draft — save and go back to dashboard
@@ -813,7 +929,7 @@ export default function RouteBuilder() {
                 disabled={isSaving}
                 className="flex items-center gap-2 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
               >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save Route Changes
               </button>
             </>
@@ -879,6 +995,161 @@ export default function RouteBuilder() {
                   disabled={isCompleted}
                 />
               </div>
+
+              <div className="space-y-3 p-3.5 rounded-xl border border-border bg-card">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1 block">
+                  Simulation Speed
+                </label>
+
+                {/* Show speed on public map toggle — saves immediately */}
+                <label className="flex items-center justify-between cursor-pointer py-1">
+                  <span className="text-sm font-medium text-foreground">Show speed on public map</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={showSpeedPublic}
+                    onClick={async () => {
+                      const newVal = !showSpeedPublic;
+                      setShowSpeedPublic(newVal);
+                      if (!routeId) return;
+                      try {
+                        await fetch(`/api/routes/${routeId}/speed`, {
+                          method: 'PATCH',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+                          },
+                          body: JSON.stringify({ showSpeedPublic: newVal }),
+                        });
+                      } catch {
+                        // revert on failure
+                        setShowSpeedPublic(!newVal);
+                        toast({ title: "Failed", description: "Could not update speed visibility", variant: "destructive" });
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${showSpeedPublic ? 'bg-primary' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${showSpeedPublic ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  </button>
+                </label>
+
+                <hr className="border-border/40" />
+
+                {/* Override duration checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useCustomDuration}
+                    onChange={(e) => setUseCustomDuration(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
+                  />
+                  <span className="text-sm font-semibold text-foreground">
+                    Override simulation duration
+                  </span>
+                </label>
+
+                {useCustomDuration && (
+                  <div className="space-y-3 animate-in fade-in slide-in-from-top-1">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        value={customDurationMinutes || ''}
+                        onChange={(e) => setCustomDurationMinutes(parseInt(e.target.value) || 0)}
+                        disabled={!useCustomDuration}
+                        className="w-24 px-3 py-1.5 rounded-lg border border-border bg-background focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none text-sm transition-all"
+                      />
+                      <span className="text-sm text-muted-foreground">minutes total</span>
+                    </div>
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
+                      <p className="text-xs font-bold text-amber-900 leading-snug flex gap-1.5 items-start">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-px" />
+                        Warning: This will artificially scale the truck's speed to hit this exact duration.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Standalone Update Speed button — only shown for existing routes */}
+                {routeId && existingRoute && (
+                  <button
+                    onClick={async () => {
+                      setSpeedSaving(true);
+                      try {
+                        const res = await fetch(`/api/routes/${routeId}/speed`, {
+                          method: 'PATCH',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+                          },
+                          body: JSON.stringify({
+                            truckSpeedKmh: 80,
+                            customDurationS: customDurationMinutes > 0 ? customDurationMinutes * 60 : null,
+                            customDurationEnabled: useCustomDuration,
+                            showSpeedPublic,
+                          }),
+                        });
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          throw new Error(err.message || 'Failed to update speed');
+                        }
+                        toast({ title: "Settings Updated", description: "Speed settings have been saved." });
+                        // Close the speed field after saving
+                        setUseCustomDuration(false);
+                        await refetchRoute();
+                      } catch (err: any) {
+                        toast({ title: "Update failed", description: err?.message || "Failed to update", variant: "destructive" });
+                      } finally {
+                        setSpeedSaving(false);
+                      }
+                    }}
+                    disabled={speedSaving || !useCustomDuration}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-white hover:bg-primary/90 font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
+                  >
+                    {speedSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />}
+                    Update Speed Settings
+                  </button>
+                )}
+
+                {/* Reset to default — only shown when a custom duration is saved */}
+                {routeId && existingRoute && (existingRoute as any).customDurationEnabled && (
+                  <button
+                    onClick={async () => {
+                      setSpeedSaving(true);
+                      try {
+                        const res = await fetch(`/api/routes/${routeId}/speed`, {
+                          method: 'PATCH',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+                          },
+                          body: JSON.stringify({
+                            customDurationS: null,
+                            customDurationEnabled: false,
+                          }),
+                        });
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          throw new Error(err.message || 'Failed to reset');
+                        }
+                        toast({ title: "Speed Reset", description: "Simulation speed reset to map-based default." });
+                        setUseCustomDuration(false);
+                        setCustomDurationMinutes(30);
+                        initializedRouteIdRef.current = null;
+                        await refetchRoute();
+                      } catch (err: any) {
+                        toast({ title: "Reset failed", description: err?.message || "Failed to reset", variant: "destructive" });
+                      } finally {
+                        setSpeedSaving(false);
+                      }
+                    }}
+                    disabled={speedSaving}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border text-muted-foreground hover:bg-muted/40 font-semibold text-sm transition-colors disabled:opacity-50"
+                  >
+                    Reset to Default
+                  </button>
+                )}
+              </div>
             </div>
 
             <hr className="border-border/50" />
@@ -930,7 +1201,7 @@ export default function RouteBuilder() {
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
                           <p className="text-xs font-medium leading-relaxed">
-                            {modificationsRestricted 
+                            {modificationsRestricted
                               ? "Activated routes can only be modified once."
                               : "Edit the current route path and stops"}
                           </p>
@@ -988,7 +1259,28 @@ export default function RouteBuilder() {
 
                   {isLiveRoute && (
                     <button
-                      onClick={() => { setRouteChangeMode(false); }}
+                      onClick={() => {
+                        // Revert local state to match DB
+                        if (existingRoute) {
+                          setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
+                          setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
+                          setStops(existingRoute.stops.map(s => ({
+                            id: `db-${s.id}`, name: s.name, lat: s.lat, lng: s.lng,
+                            durationMinutes: s.durationMinutes, dbId: s.id,
+                          })));
+                          // Restore the saved route polyline
+                          if (existingRoute.polyline?.length) {
+                             setRouteOptions([{
+                                polyline: existingRoute.polyline,
+                                distanceM: existingRoute.distanceM || 0,
+                                durationS: existingRoute.estimatedDurationS || 0,
+                                speedProfile: existingRoute.speedProfile ?? [],
+                             }]);
+                             setSelectedIdx(0);
+                          }
+                        }
+                        setRouteChangeMode(false);
+                      }}
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border bg-muted hover:bg-muted/80 text-muted-foreground font-medium text-sm transition-colors"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -1009,8 +1301,8 @@ export default function RouteBuilder() {
               </div>
             )}
 
-            {/* Route Alternatives */}
-            {(isRouting || routeOptions.length > 0) && (
+            {/* Route Alternatives — hidden after activation */}
+            {(!isLiveRoute || routeChangeMode) && (isRouting || routeOptions.length > 0) && (
               <>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -1033,8 +1325,8 @@ export default function RouteBuilder() {
                             key={i}
                             onClick={() => setSelectedIdx(i)}
                             className={`w-full text-left rounded-xl border p-3 transition-all ${isSelected
-                                ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
-                                : 'border-border/60 bg-muted/20 hover:bg-muted/40 hover:border-border'
+                              ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
+                              : 'border-border/60 bg-muted/20 hover:bg-muted/40 hover:border-border'
                               }`}
                           >
                             <div className="flex items-center justify-between mb-1.5">
@@ -1074,8 +1366,8 @@ export default function RouteBuilder() {
               <button
                 onClick={() => { setShowAddStop(!showAddStop); setMapClick(null); }}
                 className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddStop
-                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
-                    : 'bg-primary text-white hover:bg-primary/90 shadow-primary/20'
+                  ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                  : 'bg-primary text-white hover:bg-primary/90 shadow-primary/20'
                   }`}
               >
                 {showAddStop ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -1142,18 +1434,17 @@ export default function RouteBuilder() {
             {/* Summary */}
             {distance > 0 && (
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-3">Selected Route</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-emerald-600/70 mb-0.5">Distance</p>
-                    <p className="text-lg font-bold text-emerald-800">{fmt.dist(distance)}</p>
+                {/* Status Indicator */}
+                {liveSnapshot && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-100 border border-emerald-200 w-fit mb-4">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Live tracking active</span>
                   </div>
-                  <div>
-                    <p className="text-xs text-emerald-600/70 mb-0.5">Est. Drive Time</p>
-                    <p className="text-lg font-bold text-emerald-800">{fmt.dur(duration)}</p>
-                  </div>
-                </div>
-                <p className="text-xs text-emerald-600/70 mt-2">Real road geometry · {routeOptions.length} option{routeOptions.length !== 1 ? 's' : ''} found</p>
+                )}
+
+                {!isActivatedRoute && (
+                  <p className="text-xs text-emerald-600/70 mt-2">Real road geometry · {routeOptions.length} option{routeOptions.length !== 1 ? 's' : ''} found</p>
+                )}
               </div>
             )}
 
@@ -1230,22 +1521,7 @@ export default function RouteBuilder() {
               ))}
 
               {/* Live truck marker (admin view, in_progress only) — smoothly interpolated */}
-              {markerPos && (
-                <Marker longitude={markerPos.lng} latitude={markerPos.lat} anchor="center">
-                  <div className="relative flex items-center justify-center">
-                    <div className="absolute w-12 h-12 rounded-full bg-primary/25 animate-ping" />
-                    <div
-                      className="relative z-10 drop-shadow-xl"
-                      style={{ transform: `rotate(${markerPos.bearing}deg)` }}
-                    >
-                      <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
-                        <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />
-                        <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white" />
-                      </svg>
-                    </div>
-                  </div>
-                </Marker>
-              )}
+              <AnimatedTruckMarker snapshot={liveSnapshot} />
 
               {/* Map-click popup */}
               {mapClick && (

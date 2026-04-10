@@ -128,6 +128,7 @@ export interface RouteListItem {
   createdAt: string;
   updatedAt: string;
   updateCount?: number | null;
+  customDurationS?: number | null;
 }
 
 export type RouteDetailStatus =
@@ -171,6 +172,7 @@ export interface RouteDetail {
   speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;
   estimatedDurationS: number;
+  customDurationS?: number | null;
   shareToken?: string | null;
   shareLinkActive: boolean;
   stops: RouteStop[];

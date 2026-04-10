@@ -74,13 +74,14 @@ function handlePublicConnection(ws: WebSocket, token: string) {
 }
 
 function handleAdminConnection(ws: WebSocket, routeId: number) {
-  if (!adminClients.has(routeId)) {
-    adminClients.set(routeId, new Set());
+  const rid = Number(routeId);
+  if (!adminClients.has(rid)) {
+    adminClients.set(rid, new Set());
   }
-  adminClients.get(routeId)!.add(ws);
+  adminClients.get(rid)!.add(ws);
 
   ws.on("close", () => {
-    const routeClients = adminClients.get(routeId);
+    const routeClients = adminClients.get(rid);
     if (routeClients) {
       routeClients.delete(ws);
       if (routeClients.size === 0) {
@@ -103,7 +104,7 @@ export function broadcastToToken(token: string, data: unknown) {
 }
 
 export function broadcastToRoute(routeId: number, data: unknown) {
-  const routeClients = adminClients.get(routeId);
+  const routeClients = adminClients.get(Number(routeId));
   if (!routeClients) return;
 
   const message = JSON.stringify(data);

@@ -21,4 +21,5 @@ export interface RouteListItem {
   createdAt: Date;
   updatedAt: Date;
   updateCount?: number | null;
+  customDurationS?: number | null;
 }

@@ -2,9 +2,8 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, allowedEmailsTable } from "@workspace/db";
-import { AddAllowedEmailBody } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
-import { requireAuth, requireSuperAdmin, requireAdmin, type AuthRequest } from "../middlewares/auth";
+import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -25,7 +24,8 @@ router.get("/admin/allowed-emails", requireAdmin(), async (req, res) => {
  * Add a new email to the allowed list
  */
 router.post("/admin/allowed-emails", requireAdmin(), validate({ 
-  body: AddAllowedEmailBody.extend({
+  body: z.object({
+    email: z.string().email(),
     role: z.enum(["super_admin", "admin", "user"]).default("user"),
     name: z.string().optional(),
     isPaid: z.boolean().default(true),

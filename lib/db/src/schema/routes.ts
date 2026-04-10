@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, doublePrecision, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, doublePrecision, jsonb, timestamp, boolean } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -24,6 +24,9 @@ export const routesTable = pgTable("routes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updateCount: integer("update_count").notNull().default(0),
+  customDurationS: doublePrecision("custom_duration_s"),
+  customDurationEnabled: boolean("custom_duration_enabled").notNull().default(false),
+  showSpeedPublic: boolean("show_speed_public").notNull().default(true),
 });
 
 export const insertRouteSchema = createInsertSchema(routesTable).omit({ id: true, createdAt: true, updatedAt: true, deletedAt: true });

@@ -85,6 +85,7 @@ router.get("/public/track/:token", validate({ params: GetPublicTrackParams }), a
     })),
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
+    showSpeedPublic: route.showSpeedPublic,
     snapshot,
   });
 });

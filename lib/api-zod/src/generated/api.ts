@@ -159,6 +159,7 @@ export const ListRoutesResponse = zod.object({
       createdAt: zod.date(),
       updatedAt: zod.date(),
       updateCount: zod.number().nullish(),
+      customDurationS: zod.number().nullish(),
     }),
   ),
   total: zod.number(),
@@ -240,6 +241,7 @@ export const GetRouteResponse = zod.object({
     .optional(),
   distanceM: zod.number(),
   estimatedDurationS: zod.number(),
+  customDurationS: zod.number().nullish(),
   shareToken: zod.string().nullish(),
   shareLinkActive: zod.boolean(),
   stops: zod.array(
@@ -329,6 +331,7 @@ export const UpdateRouteResponse = zod.object({
     .optional(),
   distanceM: zod.number(),
   estimatedDurationS: zod.number(),
+  customDurationS: zod.number().nullish(),
   shareToken: zod.string().nullish(),
   shareLinkActive: zod.boolean(),
   stops: zod.array(

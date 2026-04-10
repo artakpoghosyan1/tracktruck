@@ -993,6 +993,9 @@ components:
         updateCount:
           type: integer
           nullable: true
+        customDurationS:
+          type: integer
+          nullable: true
       required:
         - id
         - name
@@ -1050,6 +1053,9 @@ components:
           type: number
         estimatedDurationS:
           type: number
+        customDurationS:
+          type: integer
+          nullable: true
         shareToken:
           type: string
           nullable: true

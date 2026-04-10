@@ -225,7 +225,7 @@ export default function PublicTracking() {
                   {route.status.replace('_', ' ')}
                 </span>
               </div>
-              {activeSnapshot && (
+              {activeSnapshot && (route as any).showSpeedPublic !== false && (
                 <div className="flex items-center gap-1.5">
                   <Gauge className="w-4 h-4 text-slate-400" />
                   <span className="text-2xl font-bold text-slate-900 tabular-nums">{activeSnapshot.speedKmh ?? 0}</span>
@@ -350,13 +350,15 @@ export default function PublicTracking() {
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <Gauge className="w-4 h-4 text-slate-400" />
-              <span className="text-2xl font-bold text-slate-900 tabular-nums">
-                {(activeSnapshot as SnapshotData | null)?.speedKmh ?? 0}
-              </span>
-              <span className="text-sm font-normal text-slate-400">km/h</span>
-            </div>
+            {(route as any).showSpeedPublic !== false && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Gauge className="w-4 h-4 text-slate-400" />
+                <span className="text-2xl font-bold text-slate-900 tabular-nums">
+                  {(activeSnapshot as SnapshotData | null)?.speedKmh ?? 0}
+                </span>
+                <span className="text-sm font-normal text-slate-400">km/h</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
