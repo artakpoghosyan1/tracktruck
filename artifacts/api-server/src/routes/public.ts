@@ -33,15 +33,15 @@ function computeSnapshot(route: typeof routesTable.$inferSelect, simState: typeo
     totalElapsedMs += Date.now() - simState.startedAt.getTime();
   }
 
-  const distanceTraveledM = (totalElapsedMs / 1000) * speedMs;
+  const distanceTraveledM = simState.distanceTraveledM || (totalElapsedMs / 1000) * speedMs;
   const pos = positionAlongPolyline(polyline, distanceTraveledM);
 
   return {
     routeId: route.id,
     timestamp: new Date().toISOString(),
     status: pos.completed ? "completed" : route.status,
-    distanceTraveledM: pos.distanceTraveledM,
-    progressPercent: pos.progressPercent,
+    distanceTraveledM: distanceTraveledM,
+    progressPercent: simState.progressPercent || pos.progressPercent,
     lat: pos.lat || null,
     lng: pos.lng || null,
     bearing: pos.bearing ?? null,
