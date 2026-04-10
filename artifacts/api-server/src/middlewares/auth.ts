@@ -36,7 +36,8 @@ export function requireAuth(): RequestHandler {
       authReq.userId = payload.sub;
       authReq.userEmail = payload.email;
       next();
-    } catch {
+    } catch (err: any) {
+      console.error("Authentication Error:", err.message);
       res.status(401).json({ error: "unauthorized", message: "Invalid or expired token" });
     }
   };

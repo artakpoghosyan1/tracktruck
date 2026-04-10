@@ -76,6 +76,24 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
           <nav className="space-y-2">
             {navItems.map((item) => {
               const active = location === item.href || (item.href !== '/admin' && location.startsWith(item.href));
+              const isCreateRouteLink = item.href === "/admin/routes/new";
+              const isQuotaReached = user?.role === 'user' && (user as any).usedRoutes >= (user as any).routeLimit;
+              const disabled = isCreateRouteLink && isQuotaReached;
+
+              if (disabled) {
+                return (
+                  <div 
+                    key={item.href} 
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-muted-foreground/50 cursor-not-allowed bg-muted/20"
+                    title="Route limit reached. Deactivate or delete routes to create more."
+                  >
+                    <item.icon className="w-5 h-5 opacity-40" />
+                    <span className="flex-1">{item.label}</span>
+                    <span className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded uppercase tracking-tighter">Locked</span>
+                  </div>
+                );
+              }
+
               return (
                 <Link 
                   key={item.href} 

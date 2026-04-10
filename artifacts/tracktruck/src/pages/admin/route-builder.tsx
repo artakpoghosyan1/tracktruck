@@ -6,7 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
     ArrowLeft, Save, Zap, Flag, GripVertical,
     Plus, Trash2, MapPin, X, Loader2, Play, Pause,
-    Pencil, AlertTriangle, Gauge, Settings, Copy
+    Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -304,6 +304,7 @@ export default function RouteBuilder() {
   const updateCount = (existingRoute as any)?.updateCount ?? 0;
   const remainingChanges = Math.max(0, 1 - updateCount);
   const modificationsRestricted = isUser && isLiveRoute && remainingChanges === 0;
+  const isQuotaReached = isUser && (user as any).usedRoutes >= (user as any).routeLimit;
 
   const [copied, setCopied] = useState(false);
   const copyShareUrl = () => {
@@ -791,12 +792,8 @@ export default function RouteBuilder() {
       }
     } catch (err: any) {
       const errorData = err.response?.data;
-      if (err.response?.status === 403 && errorData?.error === 'quota_exceeded') {
-        setErrorDialog({ open: true, type: "quota_exceeded", message: errorData?.message });
-      } else {
-        const msg = errorData?.message || err?.message || "Failed to save route";
-        toast({ title: "Save failed", description: msg, variant: "destructive" });
-      }
+      const msg = errorData?.message || err?.message || "Failed to save route";
+      toast({ title: "Save failed", description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -953,11 +950,16 @@ export default function RouteBuilder() {
                 <Save className="w-4 h-4" /> Save Draft
               </button>
               <button
-                onClick={() => handleSave(true)}
-                disabled={isSaving}
-                className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-primary to-blue-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
+                onClick={() => !isQuotaReached && handleSave(true)}
+                disabled={isSaving || isQuotaReached}
+                className={`flex items-center gap-2 px-5 py-2 rounded-xl font-bold text-sm shadow-md transition-all disabled:opacity-50 ${
+                  isQuotaReached 
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none' 
+                    : 'bg-gradient-to-r from-primary to-blue-500 text-white hover:shadow-lg hover:-translate-y-0.5'
+                }`}
+                title={isQuotaReached ? "Route limit reached. Deactivate or delete routes to create more." : "Activate and start tracking"}
               >
-                <Zap className="w-4 h-4" /> Activate Route
+                <Zap className="w-4 h-4" /> {isQuotaReached ? 'Locked' : 'Activate Route'}
               </button>
             </>
           ) : null}

@@ -27,6 +27,8 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<ListRoutesStatus | undefined>();
   const { user, setAuthenticated } = useAppStore();
   const { toast } = useToast();
+  
+  const isQuotaReached = user?.role === 'user' && (user as any).usedRoutes >= (user as any).routeLimit;
 
   const { data: meData, refetch: refetchMe } = useAuthMe({
     query: {
@@ -111,10 +113,18 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-foreground">Routes</h1>
           <p className="text-muted-foreground mt-1">Manage and track your fleet deliveries.</p>
         </div>
-        <Link href="/admin/routes/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-all">
-          <Plus className="w-5 h-5" />
-          Create Route
-        </Link>
+        {isQuotaReached ? (
+          <div className="inline-flex items-center gap-2 px-5 py-2.5 bg-muted text-muted-foreground/50 rounded-xl font-semibold border border-border cursor-not-allowed grayscale shadow-none" title="Route limit reached. Deactivate or delete routes to create more.">
+            <Plus className="w-5 h-5 opacity-40" />
+            Create Route
+            <span className="ml-1 text-[10px] font-bold bg-muted-foreground/10 px-1.5 py-0.5 rounded uppercase">Locked</span>
+          </div>
+        ) : (
+          <Link href="/admin/routes/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-all">
+            <Plus className="w-5 h-5" />
+            Create Route
+          </Link>
+        )}
       </div>
       
       {user?.role === 'user' && (
@@ -231,11 +241,16 @@ export default function Dashboard() {
                       <div className="flex items-center justify-end gap-1">
                         {route.status === 'draft' && (
                           <button
-                            onClick={() => handleAction('activate', route.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-primary hover:bg-primary/90 rounded-lg transition-colors shadow-sm"
-                            title="Activate route"
+                            onClick={() => !isQuotaReached && handleAction('activate', route.id)}
+                            disabled={isQuotaReached}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-lg transition-colors shadow-sm ${
+                              isQuotaReached 
+                                ? 'bg-slate-300 cursor-not-allowed' 
+                                : 'bg-primary hover:bg-primary/90'
+                            }`}
+                            title={isQuotaReached ? "Route limit reached" : "Activate route"}
                           >
-                            <Zap className="w-3.5 h-3.5 fill-current" /> Activate
+                            <Zap className="w-3.5 h-3.5 fill-current" /> {isQuotaReached ? 'Locked' : 'Activate'}
                           </button>
                         )}
                         {route.status !== 'completed' && (

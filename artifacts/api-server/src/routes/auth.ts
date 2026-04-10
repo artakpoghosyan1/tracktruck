@@ -125,10 +125,6 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
       res.status(402).json({ error: "payment_required", message: "Your account is currently unpaid. Please contact the administrator." });
       return;
     }
-    if (allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
-      res.status(403).json({ error: "quota_exceeded", message: "Your route limit has been reached. Please contact the administrator to upgrade your tier." });
-      return;
-    }
     allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
     // Sync role if it changed in allowed_emails
     if (user.role !== allowed.role) {
@@ -214,10 +210,6 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
       }
       if (!allowed.isPaid) {
         res.status(402).json({ error: "payment_required", message: "Your account is currently unpaid. Please contact the administrator." });
-        return;
-      }
-      if (allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
-        res.status(403).json({ error: "quota_exceeded", message: "Your route limit has been reached. Please contact the administrator to upgrade your tier." });
         return;
       }
       allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
@@ -333,9 +325,13 @@ router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, re
     .set({ revoked: true })
     .where(eq(refreshTokensTable.id, stored.id));
 
+  // Fetch allowed data for refreshed user to include in payload
+  const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, user.email)).limit(1);
+  const allowedRes = allowed ? { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes } : { isPaid: true, routeLimit: 25, usedRoutes: 0 };
+
   const { accessToken: newAccessToken, refreshToken: newRefreshToken } = await issueTokenPair(user.id, user.email, user.role);
 
-  res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken, user: userPayload(user) });
+  res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken, user: userPayload({ ...user, ...allowedRes }) });
 });
 
 router.post("/auth/logout", requireAuth(), async (req, res) => {
@@ -378,10 +374,6 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
     }
     if (!allowed.isPaid) {
       res.status(402).json({ error: "payment_required", message: "Your account is currently unpaid." });
-      return;
-    }
-    if (allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
-      res.status(403).json({ error: "quota_exceeded", message: "Your route limit has been reached." });
       return;
     }
     allowedData = { isPaid: allowed.isPaid, routeLimit: allowed.routeLimit, usedRoutes: allowed.usedRoutes };
