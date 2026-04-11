@@ -33,7 +33,9 @@ function computeSnapshot(route: typeof routesTable.$inferSelect, simState: typeo
     totalElapsedMs += Date.now() - simState.startedAt.getTime();
   }
 
-  const distanceTraveledM = simState.distanceTraveledM || (totalElapsedMs / 1000) * speedMs;
+  const distanceTraveledM = simState.distanceTraveledM != null
+    ? simState.distanceTraveledM
+    : (totalElapsedMs / 1000) * speedMs;
   const pos = positionAlongPolyline(polyline, distanceTraveledM);
 
   return {

@@ -33,4 +33,17 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.use("/api", router);
 
+// Global error handler — catches any unhandled error thrown in route handlers
+// and returns a JSON response instead of hanging/crashing.
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("Unhandled route error:", err);
+  const status = typeof err.status === "number" ? err.status : 500;
+  res.status(status).json({
+    error: "internal_error",
+    message: process.env["NODE_ENV"] === "production"
+      ? "An unexpected error occurred"
+      : (err.message ?? "Unknown error"),
+  });
+});
+
 export default app;

@@ -38,6 +38,12 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     return;
   }
 
+  const polyline = (route.polyline as number[][] | null) ?? [];
+  if (polyline.length < 2) {
+    res.status(400).json({ error: "bad_request", message: "Route must have at least 2 points on the map before it can be activated." });
+    return;
+  }
+
   const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, authReq.user.email)).limit(1);
   if (allowed && allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
     res.status(403).json({ error: "quota_exceeded", message: "Route limit reached. Upgrade your plan to activate more routes." });

@@ -71,7 +71,15 @@ router.post("/admin/allowed-emails", requireAdmin(), validate({
  * PUT /api/admin/allowed-emails/:email
  * Update settings for an allowed email
  */
-router.put("/admin/allowed-emails/:email", requireAdmin(), async (req, res) => {
+router.put("/admin/allowed-emails/:email", requireAdmin(), validate({
+  body: z.object({
+    isPaid: z.boolean().optional(),
+    routeLimit: z.number().int().positive().optional(),
+    usedRoutes: z.number().int().min(0).optional(),
+    role: z.enum(["super_admin", "admin", "user"]).optional(),
+    name: z.string().optional(),
+  })
+}), async (req, res) => {
   const email = req.params.email as string;
   const lowerEmail = email.toLowerCase();
   const { isPaid, routeLimit, usedRoutes, role, name } = req.body as { 

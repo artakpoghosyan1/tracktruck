@@ -2,10 +2,10 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
 const JWT_SECRET = process.env["JWT_SECRET"] || "tracktruck-dev-secret-change-in-prod";
-const ACCESS_TOKEN_EXPIRES = "30d";
-const REFRESH_TOKEN_EXPIRES = "90d";
+const ACCESS_TOKEN_EXPIRES = "15m";
+const REFRESH_TOKEN_EXPIRES = "7d";
 
-export const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days in ms
+export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 export interface JwtPayload {
   sub: number;

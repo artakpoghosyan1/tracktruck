@@ -357,6 +357,13 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     }
   }
 
+  // Re-fetch the active share link so the response reflects the real state
+  const [updatedShareLink] = await db
+    .select()
+    .from(shareLinksTable)
+    .where(and(eq(shareLinksTable.routeId, updated.id), eq(shareLinksTable.active, true)))
+    .limit(1);
+
   res.json({
     id: updated.id,
     name: updated.name,
@@ -370,8 +377,8 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     speedProfile: updated.speedProfile,
     distanceM: updated.distanceM,
     estimatedDurationS: updated.estimatedDurationS,
-    shareToken: null,
-    shareLinkActive: false,
+    shareToken: updatedShareLink?.token ?? null,
+    shareLinkActive: updatedShareLink?.active ?? false,
     stops: [],
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),
