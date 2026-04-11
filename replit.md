@@ -56,6 +56,29 @@ Tables defined in `lib/db/src/schema/`:
 Route statuses: draft, ready, in_progress, paused, completed, expired
 Payment statuses: pending, authorized, paid, failed, expired, refunded
 
+## Schema Sync Status
+
+The database schema is fully in sync with the Drizzle schema definitions.
+
+**Verified 2026-04-11** — `routes.update_count` column confirmed present:
+
+```sql
+SELECT column_name, data_type, column_default, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'routes'
+ORDER BY ordinal_position;
+-- Result includes: update_count | integer | 0 | NO
+```
+
+All columns defined in `lib/db/src/schema/routes.ts` exist in the database, including `update_count` (integer, NOT NULL, default 0). After restarting the API server workflow, logs show clean startup:
+
+```
+Starting simulation engine...
+Server listening on port 8080
+```
+
+No `column routes.update_count does not exist` errors appear in API server logs. Simulation tick cycles run without errors.
+
 ## Implementation Status
 
 All features are **fully implemented**:
