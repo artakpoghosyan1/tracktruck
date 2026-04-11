@@ -94,6 +94,66 @@ function computeDistanceWithSpeedProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Speed-profile scaling
+// ---------------------------------------------------------------------------
+
+/**
+ * Scale the speed profile so the truck actually moves at the pace the admin
+ * configured via `truckSpeedKmh`.
+ *
+ * The raw Mapbox / OSRM profile contains realistic traffic-modelled speeds
+ * (often 10-30 km/h in urban areas).  Even when the distance-weighted average
+ * is fine, individual slow segments dominate the *time* budget and make the
+ * truck crawl for the first portion of the route.
+ *
+ * Strategy:
+ *  1. Enforce a per-segment minimum speed floor (50% of targetAvgKmh) so no
+ *     segment is absurdly slow.
+ *  2. After flooring, proportionally scale all segments so the distance-
+ *     weighted average equals `targetAvgKmh`.
+ *
+ * This preserves relative variation (highways stay faster than urban) while
+ * eliminating the 10-30 km/h crawl problem.
+ */
+function scaleSpeedProfile(profile: SpeedSegment[], targetAvgKmh: number): SpeedSegment[] {
+  if (!profile || profile.length === 0 || targetAvgKmh <= 0) return profile;
+
+  const minFloorKmh = targetAvgKmh * 0.75; // no segment slower than 75% of target
+
+  // Step 1: apply the floor
+  const floored = profile.map(seg => ({
+    distanceM: seg.distanceM,
+    speedKmh: (!isFinite(seg.speedKmh) || seg.speedKmh <= 0)
+      ? targetAvgKmh
+      : Math.max(seg.speedKmh, minFloorKmh),
+  }));
+
+  // Step 2: compute the distance-weighted average after flooring
+  let totalDist = 0;
+  let totalTimeS = 0;
+  for (const seg of floored) {
+    if (seg.distanceM <= 0) continue;
+    totalDist += seg.distanceM;
+    totalTimeS += seg.distanceM / (seg.speedKmh / 3.6);
+  }
+
+  if (totalDist <= 0 || totalTimeS <= 0) return floored;
+
+  const flooredAvgKmh = (totalDist / totalTimeS) * 3.6;
+  if (flooredAvgKmh <= 0 || !isFinite(flooredAvgKmh)) return floored;
+
+  // If already at or above target after flooring, return as-is
+  if (flooredAvgKmh >= targetAvgKmh) return floored;
+
+  // Step 3: proportionally scale to hit the target average
+  const scaleFactor = targetAvgKmh / flooredAvgKmh;
+  return floored.map(seg => ({
+    distanceM: seg.distanceM,
+    speedKmh: seg.speedKmh * scaleFactor,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Geo & bearing helpers
 // ---------------------------------------------------------------------------
 
@@ -326,8 +386,13 @@ async function tick() {
     const totalElapsedMs = simState.effectiveElapsedMs + wallElapsedMs;
     const totalElapsedS = totalElapsedMs / 1000;
 
-    const speedProfile = (route.speedProfile as SpeedSegment[] | null) || [];
+    const rawSpeedProfile = (route.speedProfile as SpeedSegment[] | null) || [];
     const polyline = (route.polyline as number[][]) || [];
+
+    // Scale the OSRM/Mapbox speed profile so that its distance-weighted
+    // average matches truckSpeedKmh.  Raw profiles contain realistic traffic
+    // speeds (often 20-40 km/h in cities), which made the truck crawl.
+    const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedKmh);
 
     // Load stops for this route
     const dbStops = await db
@@ -367,6 +432,9 @@ async function tick() {
       route.truckSpeedKmh,
       speedMultiplier,
     );
+
+
+
 
     // -----------------------------------------------------------------------
     // Stop / traffic-light detection

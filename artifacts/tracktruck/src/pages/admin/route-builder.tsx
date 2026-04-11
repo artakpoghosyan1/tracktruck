@@ -4,9 +4,9 @@ import Map, { Marker, Source, Layer, MapRef, Popup } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
-    ArrowLeft, Save, Zap, Flag, GripVertical,
-    Plus, Trash2, MapPin, X, Loader2, Play, Pause,
-    Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon
+  ArrowLeft, Save, Zap, Flag, GripVertical,
+  Plus, Trash2, MapPin, X, Loader2, Play, Pause,
+  Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -92,7 +92,7 @@ const AnimatedTruckMarker = memo(({ snapshot }: {
       return;
     }
     const target = { lat: snapshot.lat, lng: snapshot.lng, bearing: snapshot.bearing };
-    
+
     // If it's the first snapshot, jump to it immediately
     if (!posRef.current) {
       setPos(target);
@@ -107,7 +107,7 @@ const AnimatedTruckMarker = memo(({ snapshot }: {
     const animate = (now: number) => {
       const elapsed = now - startTime;
       const t = Math.min(elapsed / TICK_MS, 1);
-      
+
       let bdiff = target.bearing - from.bearing;
       if (bdiff > 180) bdiff -= 360;
       if (bdiff < -180) bdiff += 360;
@@ -398,6 +398,27 @@ export default function RouteBuilder() {
     setShowSpeedPublic(er.showSpeedPublic ?? true);
   }, [existingRoute]);
 
+  // --- Resolve Start/End addresses if they are initially coordinates ---
+  useEffect(() => {
+    if (!mapboxToken) return;
+    const resolve = async (point: { lat: number, lng: number, label: string }, setter: any) => {
+      // If label looks like '-12.3456, 78.9012'
+      const isCoord = /^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(point.label);
+      if (!isCoord) return;
+      try {
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json?access_token=${mapboxToken}&types=address,place,poi&limit=1`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const address = data.features?.[0]?.place_name;
+        if (address) {
+          setter((prev: any) => prev && prev.lat === point.lat && prev.lng === point.lng ? { ...prev, label: address } : prev);
+        }
+      } catch (e) { console.error("Geocoding error", e); }
+    };
+    if (start) resolve(start, setStart);
+    if (end) resolve(end, setEnd);
+  }, [start?.lat, start?.lng, end?.lat, end?.lng, mapboxToken]);
+
   // --- Admin live WebSocket: show truck position when route is in_progress ---
   // When paused, keep the last known snapshot so the marker stays visible.
   useEffect(() => {
@@ -426,7 +447,7 @@ export default function RouteBuilder() {
             });
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
 
     // Only connect WS when actively running or paused (stay connected for immediate resume)
@@ -549,7 +570,9 @@ export default function RouteBuilder() {
 
         if (options.length > 0) {
           setRouteOptions(options);
-          setSelectedIdx(0);
+          // Only auto-select the first option for completely new routes.
+          // For existing routes, we want to maintain the selection provided by the init effect.
+          if (!routeId) setSelectedIdx(0);
 
           // Fit map to the first (shortest) route
           if (mapRef.current && mapboxToken) {
@@ -767,9 +790,7 @@ export default function RouteBuilder() {
 
       if (isActivate) {
         await activateMut.mutateAsync({ id: savedRoute.id });
-        // Keep only the selected route option, discard alternatives
-        setRouteOptions([routeOptions[selectedIdx]]);
-        setSelectedIdx(0);
+        // Keep alternatives visible even after activation
         // Reset init ref so if we redirect to the same route ID, the effect re-runs
         initializedRouteIdRef.current = null;
         toast({ title: "Route Activated!", description: "Your route is ready. Press Start to begin tracking." });
@@ -952,11 +973,10 @@ export default function RouteBuilder() {
               <button
                 onClick={() => !isQuotaReached && handleSave(true)}
                 disabled={isSaving || isQuotaReached}
-                className={`flex items-center gap-2 px-5 py-2 rounded-xl font-bold text-sm shadow-md transition-all disabled:opacity-50 ${
-                  isQuotaReached 
-                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none' 
+                className={`flex items-center gap-2 px-5 py-2 rounded-xl font-bold text-sm shadow-md transition-all disabled:opacity-50 ${isQuotaReached
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
                     : 'bg-gradient-to-r from-primary to-blue-500 text-white hover:shadow-lg hover:-translate-y-0.5'
-                }`}
+                  }`}
                 title={isQuotaReached ? "Route limit reached. Deactivate or delete routes to create more." : "Activate and start tracking"}
               >
                 <Zap className="w-4 h-4" /> {isQuotaReached ? 'Locked' : 'Activate Route'}
@@ -1170,21 +1190,23 @@ export default function RouteBuilder() {
               {/* Locked state: show current values with a Change Route button */}
               {routeLocked ? (
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 space-y-2.5">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 space-y-3">
                     <div className="flex items-start gap-2.5">
-                      <div className="w-3 h-3 rounded-full bg-black border border-white ring-2 ring-black/20 shrink-0 mt-0.5" />
+                      <div className="w-3.5 h-3.5 rounded-full bg-black border border-white ring-2 ring-black/20 shrink-0 mt-1" />
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold text-muted-foreground">Start</p>
-                        <p className="text-sm font-medium text-foreground truncate">{start?.label ?? '—'}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-tight text-muted-foreground">Start Location</p>
+                        <p className="text-sm font-bold text-foreground line-clamp-2 leading-tight mb-0.5">{start?.label ?? '—'}</p>
+                        <p className="text-[10px] tabular-nums font-mono text-muted-foreground/80">{start?.lat.toFixed(6)}, {start?.lng.toFixed(6)}</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-2.5">
-                      <div className="w-3 h-3 rounded-full bg-primary shrink-0 flex items-center justify-center mt-0.5">
-                        <Flag className="w-1.5 h-1.5 text-white" />
+                      <div className="w-3.5 h-3.5 rounded-full bg-primary shrink-0 flex items-center justify-center mt-1">
+                        <Flag className="w-2 h-2 text-white" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold text-muted-foreground">End</p>
-                        <p className="text-sm font-medium text-foreground truncate">{end?.label ?? '—'}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-tight text-muted-foreground">End Location</p>
+                        <p className="text-sm font-bold text-foreground line-clamp-2 leading-tight mb-0.5">{end?.label ?? '—'}</p>
+                        <p className="text-[10px] tabular-nums font-mono text-muted-foreground/80">{end?.lat.toFixed(6)}, {end?.lng.toFixed(6)}</p>
                       </div>
                     </div>
                   </div>
@@ -1233,8 +1255,8 @@ export default function RouteBuilder() {
                       onSelect={(r) => setStart({ lng: r.lng, lat: r.lat, label: r.placeName })}
                     />
                     {start && (
-                      <p className="text-xs text-emerald-600 mt-1 pl-1 font-medium">
-                        ✓ {start.lat.toFixed(4)}, {start.lng.toFixed(4)}
+                      <p className="text-[10px] tabular-nums font-mono text-emerald-600 mt-1 pl-1">
+                        ✓ {start.lat.toFixed(6)}, {start.lng.toFixed(6)}
                       </p>
                     )}
                   </div>
@@ -1253,8 +1275,8 @@ export default function RouteBuilder() {
                       onSelect={(r) => setEnd({ lng: r.lng, lat: r.lat, label: r.placeName })}
                     />
                     {end && (
-                      <p className="text-xs text-emerald-600 mt-1 pl-1 font-medium">
-                        ✓ {end.lat.toFixed(4)}, {end.lng.toFixed(4)}
+                      <p className="text-[10px] tabular-nums font-mono text-emerald-600 mt-1 pl-1">
+                        ✓ {end.lat.toFixed(6)}, {end.lng.toFixed(6)}
                       </p>
                     )}
                   </div>
@@ -1272,13 +1294,13 @@ export default function RouteBuilder() {
                           })));
                           // Restore the saved route polyline
                           if (existingRoute.polyline?.length) {
-                             setRouteOptions([{
-                                polyline: existingRoute.polyline,
-                                distanceM: existingRoute.distanceM || 0,
-                                durationS: existingRoute.estimatedDurationS || 0,
-                                speedProfile: existingRoute.speedProfile ?? [],
-                             }]);
-                             setSelectedIdx(0);
+                            setRouteOptions([{
+                              polyline: existingRoute.polyline,
+                              distanceM: existingRoute.distanceM || 0,
+                              durationS: existingRoute.estimatedDurationS || 0,
+                              speedProfile: existingRoute.speedProfile ?? [],
+                            }]);
+                            setSelectedIdx(0);
                           }
                         }
                         setRouteChangeMode(false);
@@ -1303,8 +1325,8 @@ export default function RouteBuilder() {
               </div>
             )}
 
-            {/* Route Alternatives — hidden after activation */}
-            {(!isLiveRoute || routeChangeMode) && (isRouting || routeOptions.length > 0) && (
+            {/* Route Alternatives — always visible when options exist */}
+            {(isRouting || routeOptions.length > 0) && (
               <>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

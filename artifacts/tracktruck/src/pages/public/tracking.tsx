@@ -32,6 +32,8 @@ export default function PublicTracking() {
 
   const [snapshot, setSnapshot] = useState<SnapshotData | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [currentAddress, setCurrentAddress] = useState<string | null>(null);
+  const lastGeocodeRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
   // Clear live data if route is not in progress
   useEffect(() => {
@@ -149,6 +151,49 @@ export default function PublicTracking() {
 
   const activeSnapshot = snapshot || route?.snapshot;
 
+  // --- Reverse Geocoding for current address ---
+  useEffect(() => {
+    if (!mapboxToken || !activeSnapshot?.lat || !activeSnapshot?.lng || route?.status !== "in_progress") {
+      if (route?.status !== "in_progress") setCurrentAddress(null);
+      return;
+    }
+
+    const { lat, lng } = activeSnapshot;
+    const now = Date.now();
+    const last = lastGeocodeRef.current;
+
+    // Thresholds: 250m or 60s
+    const distThreshold = 0.0025; // approx 250m
+    const timeThreshold = 60000; // 60s
+
+    const shouldUpdate = !last ||
+      now - last.time > timeThreshold ||
+      Math.abs(last.lat - lat) > distThreshold ||
+      Math.abs(last.lng - lng) > distThreshold;
+
+    if (!shouldUpdate) return;
+
+    const fetchAddress = async () => {
+      try {
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&limit=1&types=address,place,poi`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const address = data.features?.[0]?.place_name;
+        if (address) {
+          // Clean up address (take first 2 parts for brevity in mobile UI)
+          const parts = address.split(",");
+          const shortAddress = parts.length > 2 ? parts.slice(0, 2).join(",") : address;
+          setCurrentAddress(shortAddress);
+          lastGeocodeRef.current = { lat, lng, time: now };
+        }
+      } catch (err) {
+        console.error("Reverse geocoding error:", err);
+      }
+    };
+
+    fetchAddress();
+  }, [activeSnapshot?.lat, activeSnapshot?.lng, mapboxToken, route?.status]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -222,7 +267,9 @@ export default function PublicTracking() {
               <div className="flex items-center gap-2">
                 <span className={`inline-flex w-2 h-2 rounded-full ${isLive ? 'bg-emerald-500' : 'bg-amber-400'}`} />
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {route.status.replace('_', ' ')}
+                  {activeSnapshot?.atStopName 
+                    ? `At: ${activeSnapshot.atStopName}` 
+                    : currentAddress || route.status.replace('_', ' ')}
                 </span>
               </div>
               {activeSnapshot && (route as any).showSpeedPublic !== false && (
@@ -345,8 +392,10 @@ export default function PublicTracking() {
                 {isLive && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
                 <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
               </span>
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                {route.status.replace('_', ' ')}
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate max-w-[200px]">
+                {activeSnapshot?.atStopName 
+                  ? `At: ${activeSnapshot.atStopName}` 
+                  : currentAddress || route.status.replace('_', ' ')}
               </span>
             </div>
 
