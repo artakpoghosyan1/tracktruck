@@ -1,4 +1,4 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
 import { positionAlongPolyline, haversineM } from "./geo";
 import { broadcastToToken, broadcastToRoute } from "../routes/ws";
@@ -376,13 +376,14 @@ async function tick() {
     .select({ route: routesTable, simState: simulationStatesTable })
     .from(routesTable)
     .innerJoin(simulationStatesTable, eq(simulationStatesTable.routeId, routesTable.id))
-    .where(eq(routesTable.status, "in_progress"));
+    .where(inArray(routesTable.status, ["in_progress", "paused"]));
 
   for (const { route, simState } of activeRoutes) {
-    if (!simState.startedAt) continue;
+    // Route must have been started at least once
+    if (!simState.startedAt && !simState.pausedAt) continue;
 
     const nowMs = Date.now();
-    const wallElapsedMs = nowMs - simState.startedAt.getTime();
+    const wallElapsedMs = simState.startedAt ? nowMs - simState.startedAt.getTime() : 0;
     const totalElapsedMs = simState.effectiveElapsedMs + wallElapsedMs;
     const totalElapsedS = totalElapsedMs / 1000;
 
@@ -552,9 +553,11 @@ async function tick() {
       // During grace period: keep broadcasting as "in_progress" so UI stays open
       status: trulyCompleted
         ? "completed"
-        : isAtAnyStop
-          ? "at_stop"
-          : "in_progress",
+        : route.status === "paused"
+          ? "paused"
+          : isAtAnyStop
+            ? "at_stop"
+            : "in_progress",
       atStopName: visibleStopName,
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent,

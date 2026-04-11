@@ -867,7 +867,7 @@ export default function RouteBuilder() {
           )}
 
           {/* Live speed badge */}
-          {existingRoute?.status === 'in_progress' && liveSpeedKmh !== null && (
+          {['in_progress', 'paused'].includes(existingRoute?.status ?? '') && liveSpeedKmh !== null && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl">
               <Gauge className="w-4 h-4 text-emerald-600" />
               <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedKmh}</span>

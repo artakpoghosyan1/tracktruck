@@ -37,7 +37,7 @@ export default function PublicTracking() {
 
   // Clear live data if route is not in progress
   useEffect(() => {
-    if (route && route.status !== 'in_progress') {
+    if (route && !['in_progress', 'paused'].includes(route.status)) {
       setSnapshot(null);
       setMarkerPos(null);
       markerPosRef.current = null;
@@ -267,9 +267,7 @@ export default function PublicTracking() {
               <div className="flex items-center gap-2">
                 <span className={`inline-flex w-2 h-2 rounded-full ${isLive ? 'bg-emerald-500' : 'bg-amber-400'}`} />
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {activeSnapshot?.atStopName 
-                    ? `At: ${activeSnapshot.atStopName}` 
-                    : currentAddress || route.status.replace('_', ' ')}
+                  {currentAddress || 'Locating truck...'}
                 </span>
               </div>
               {activeSnapshot && (route as any).showSpeedPublic !== false && (
@@ -393,9 +391,7 @@ export default function PublicTracking() {
                 <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate max-w-[200px]">
-                {activeSnapshot?.atStopName 
-                  ? `At: ${activeSnapshot.atStopName}` 
-                  : currentAddress || route.status.replace('_', ' ')}
+                {currentAddress || 'Locating truck...'}
               </span>
             </div>
 
