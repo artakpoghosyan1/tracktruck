@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, and, gt } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
+import rateLimit from "express-rate-limit";
 import { db, usersTable, oauthAccountsTable, refreshTokensTable, allowedEmailsTable } from "@workspace/db";
 import { AuthSignupBody, AuthLoginBody, AuthRefreshBody, AuthGoogleBody, AuthForgotPasswordBody, AuthVerifyEmailBody } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
@@ -13,6 +14,25 @@ import {
   hashToken,
   REFRESH_TOKEN_TTL_MS,
 } from "../lib/jwt";
+import { ROOT_ADMIN_EMAIL } from "../lib/config";
+
+/** 10 requests per 15 minutes per IP — for credential endpoints (login, signup, google) */
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "too_many_requests", message: "Too many attempts. Please wait 15 minutes and try again." },
+});
+
+/** 20 requests per 15 minutes per IP — for token refresh (less sensitive, but still rate-limit) */
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "too_many_requests", message: "Too many token refreshes. Please wait 15 minutes." },
+});
 
 const router: IRouter = Router();
 
@@ -57,7 +77,7 @@ async function issueTokenPair(userId: number, email: string, role: string) {
 
 // ─── routes ─────────────────────────────────────────────────────────────────
 
-router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res) => {
+router.post("/auth/signup", authLimiter, validate({ body: AuthSignupBody }), async (req, res) => {
   const { email, password, name } = req.body as { email: string; password: string; name: string };
   const lowerEmail = email.toLowerCase();
 
@@ -69,7 +89,7 @@ router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res)
 
   let role = "user";
   let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
-  if (lowerEmail === "artakpoghosyan1@gmail.com") {
+  if (ROOT_ADMIN_EMAIL && lowerEmail === ROOT_ADMIN_EMAIL) {
     role = "super_admin";
   } else {
     const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, lowerEmail)).limit(1);
@@ -97,7 +117,7 @@ router.post("/auth/signup", validate({ body: AuthSignupBody }), async (req, res)
   });
 });
 
-router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) => {
+router.post("/auth/login", authLimiter, validate({ body: AuthLoginBody }), async (req, res) => {
   const { email, password } = req.body as { email: string; password: string };
   const lowerEmail = email.toLowerCase();
 
@@ -115,7 +135,7 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
 
   let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
   // Permission Check: ensure email is still in allowed_emails (except for root)
-  if (lowerEmail !== "artakpoghosyan1@gmail.com") {
+  if (!ROOT_ADMIN_EMAIL || lowerEmail !== ROOT_ADMIN_EMAIL) {
     const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, lowerEmail)).limit(1);
     if (!allowed) {
       res.status(403).json({ error: "forbidden", message: "Your access has been revoked. Please contact the administrator." });
@@ -134,7 +154,7 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
   }
 
   // Ensure root super admin role is preserved and synced
-  if (user.email === "artakpoghosyan1@gmail.com" && user.role !== "super_admin") {
+  if (ROOT_ADMIN_EMAIL && user.email === ROOT_ADMIN_EMAIL && user.role !== "super_admin") {
     await db.update(usersTable).set({ role: "super_admin" }).where(eq(usersTable.id, user.id));
     user.role = "super_admin";
   }
@@ -144,7 +164,7 @@ router.post("/auth/login", validate({ body: AuthLoginBody }), async (req, res) =
   res.json({ accessToken, refreshToken, user: userPayload({ ...user, ...allowedData }) });
 });
 
-router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res) => {
+router.post("/auth/google", authLimiter, validate({ body: AuthGoogleBody }), async (req, res) => {
   const googleClientId = process.env["GOOGLE_CLIENT_ID"];
   if (!googleClientId) {
     res.status(503).json({
@@ -202,7 +222,7 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     
     // Permission Check: ensure email is still in allowed_emails (except for root)
     let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
-    if (user.email !== "artakpoghosyan1@gmail.com") {
+    if (!ROOT_ADMIN_EMAIL || user.email !== ROOT_ADMIN_EMAIL) {
       const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, user.email)).limit(1);
       if (!allowed) {
         res.status(403).json({ error: "forbidden", message: "Your access has been revoked. Please contact the administrator." });
@@ -221,7 +241,7 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     }
 
     // Safety check: ensure root super admin role is preserved
-    if (user.email === "artakpoghosyan1@gmail.com" && user.role !== "super_admin") {
+    if (ROOT_ADMIN_EMAIL && user.email === ROOT_ADMIN_EMAIL && user.role !== "super_admin") {
       await db.update(usersTable).set({ role: "super_admin" }).where(eq(usersTable.id, user.id));
       user.role = "super_admin";
     }
@@ -237,7 +257,7 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
     }
 
     let role = "user";
-    if (googleEmail === "artakpoghosyan1@gmail.com") {
+    if (ROOT_ADMIN_EMAIL && googleEmail === ROOT_ADMIN_EMAIL) {
       role = "super_admin";
     } else {
       const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, googleEmail)).limit(1);
@@ -278,7 +298,7 @@ router.post("/auth/google", validate({ body: AuthGoogleBody }), async (req, res)
   res.json({ accessToken, refreshToken, user: userPayload({ ...user, ...allowedRes }) });
 });
 
-router.post("/auth/refresh", validate({ body: AuthRefreshBody }), async (req, res) => {
+router.post("/auth/refresh", refreshLimiter, validate({ body: AuthRefreshBody }), async (req, res) => {
   const { refreshToken } = req.body as { refreshToken: string };
 
   let payload;
@@ -366,7 +386,7 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
 
   // Permission Check: ensure revoked users are kicked out immediately on next auth check
   let allowedData = { isPaid: true, routeLimit: 25, usedRoutes: 0 };
-  if (user.email !== "artakpoghosyan1@gmail.com") {
+  if (!ROOT_ADMIN_EMAIL || user.email !== ROOT_ADMIN_EMAIL) {
     const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, user.email)).limit(1);
     if (!allowed) {
       res.status(403).json({ error: "forbidden", message: "Your access has been revoked." });

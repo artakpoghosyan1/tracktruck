@@ -1,7 +1,20 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
-const JWT_SECRET = process.env["JWT_SECRET"] || "tracktruck-dev-secret-change-in-prod";
+const DEV_SECRET = "tracktruck-dev-secret-change-in-prod";
+const JWT_SECRET = (() => {
+  const secret = process.env["JWT_SECRET"];
+  const isProduction = process.env["NODE_ENV"] === "production";
+  if (!secret || secret === DEV_SECRET) {
+    if (isProduction) {
+      console.error("FATAL: JWT_SECRET is not set or is still the dev placeholder. Set a strong random secret before deploying.");
+      process.exit(1);
+    }
+    console.warn("WARNING: Using insecure dev JWT_SECRET. Set JWT_SECRET in your environment for production.");
+    return DEV_SECRET;
+  }
+  return secret;
+})();
 const ACCESS_TOKEN_EXPIRES = "15m";
 const REFRESH_TOKEN_EXPIRES = "7d";
 

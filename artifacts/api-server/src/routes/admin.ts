@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db, allowedEmailsTable } from "@workspace/db";
 import { validate } from "../middlewares/validate";
 import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth";
+import { ROOT_ADMIN_EMAIL } from "../lib/config";
 
 const router: IRouter = Router();
 
@@ -125,7 +126,7 @@ router.delete("/admin/allowed-emails/:email", requireAdmin(), async (req, res) =
   const email = req.params.email as string;
   const lowerEmail = email.toLowerCase();
 
-  if (lowerEmail === "artakpoghosyan1@gmail.com") {
+  if (ROOT_ADMIN_EMAIL && lowerEmail === ROOT_ADMIN_EMAIL) {
     res.status(403).json({ error: "forbidden", message: "Cannot remove the root super admin" });
     return;
   }
