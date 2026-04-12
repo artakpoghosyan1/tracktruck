@@ -272,7 +272,7 @@ export default function RouteBuilder() {
 
   // Custom simulation duration
   const [useCustomDuration, setUseCustomDuration] = useState(false);
-  const [customDurationMinutes, setCustomDurationMinutes] = useState(30);
+  const [customDurationMinutes, setCustomDurationMinutes] = useState(0);
 
   // Speed visibility for public tracking page
   const [showSpeedPublic, setShowSpeedPublic] = useState(true);
@@ -1076,6 +1076,7 @@ export default function RouteBuilder() {
                       <input
                         type="number"
                         min="1"
+                        placeholder="60"
                         value={customDurationMinutes || ''}
                         onChange={(e) => setCustomDurationMinutes(parseInt(e.target.value) || 0)}
                         disabled={!useCustomDuration}
