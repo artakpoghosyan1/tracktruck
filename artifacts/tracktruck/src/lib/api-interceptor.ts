@@ -6,7 +6,7 @@ const originalFetch = window.fetch;
 
 window.fetch = async (resource, config) => {
   if (typeof resource === 'string' && resource.startsWith('/api')) {
-    const apiUrl = import.meta.env.API_URL;
+    const apiUrl = import.meta.env.VITE_API_URL;
     if (apiUrl) {
       resource = `${apiUrl}${resource}`;
     }
