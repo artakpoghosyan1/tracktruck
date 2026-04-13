@@ -1,10 +1,16 @@
 /**
  * Global fetch interceptor to inject JWT token into /api requests
+ * and rewrite relative /api paths to the configured backend base URL.
  */
 const originalFetch = window.fetch;
 
 window.fetch = async (resource, config) => {
   if (typeof resource === 'string' && resource.startsWith('/api')) {
+    const apiUrl = import.meta.env.API_URL;
+    if (apiUrl) {
+      resource = `${apiUrl}${resource}`;
+    }
+
     const token = localStorage.getItem('tracktruck_token');
     if (token) {
       config = config || {};
