@@ -49,10 +49,6 @@ export default defineConfig({
     port,
     host: "0.0.0.0",
     allowedHosts: true,
-    // Proxy /api calls to the API server when running locally
-    proxy: {
-      "/api": { target: process.env.API_URL ?? "http://localhost:8080", changeOrigin: true, ws: true }
-    },
     fs: {
       strict: true,
       deny: ["**/.*"],
