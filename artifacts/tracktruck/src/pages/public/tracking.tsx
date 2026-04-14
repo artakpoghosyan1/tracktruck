@@ -93,8 +93,12 @@ export default function PublicTracking() {
   useEffect(() => {
     if (!token || isError) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/public/ws/track/${token}`;
+    const apiUrl = import.meta.env.VITE_API_URL as string | undefined;
+    const backendHost = apiUrl ? new URL(apiUrl).host : window.location.host;
+    const backendProtocol = apiUrl
+      ? (new URL(apiUrl).protocol === 'https:' ? 'wss:' : 'ws:')
+      : (window.location.protocol === 'https:' ? 'wss:' : 'ws:');
+    const wsUrl = `${backendProtocol}//${backendHost}/api/public/ws/track/${token}`;
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
 
