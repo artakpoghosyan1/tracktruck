@@ -458,8 +458,10 @@ export default function RouteBuilder() {
     const jwt = localStorage.getItem('tracktruck_token');
     if (!jwt) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/admin/ws/routes/${routeId}?token=${encodeURIComponent(jwt)}`;
+    const apiUrl = import.meta.env.VITE_API_URL;
+    const wsHost = apiUrl ? new URL(apiUrl).host : window.location.host;
+    const wsProtocol = (apiUrl ? new URL(apiUrl).protocol : window.location.protocol) === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${wsHost}/api/admin/ws/routes/${routeId}?token=${encodeURIComponent(jwt)}`;
 
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
