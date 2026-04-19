@@ -401,6 +401,9 @@ router.delete("/routes/:id", validate({ params: DeleteRouteParams }), async (req
   }
 
   await db.update(routesTable).set({ deletedAt: new Date() }).where(eq(routesTable.id, id));
+  
+  // Deactivate all share links immediately so public map stops working
+  await db.update(shareLinksTable).set({ active: false }).where(eq(shareLinksTable.routeId, id));
 
   res.status(204).send();
 });

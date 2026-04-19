@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
 import { GetPublicTrackParams, GetPublicTrackStateParams } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
@@ -16,7 +16,11 @@ async function getRouteByToken(token: string) {
 
   if (!shareLink) return null;
 
-  const [route] = await db.select().from(routesTable).where(eq(routesTable.id, shareLink.routeId)).limit(1);
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, shareLink.routeId), isNull(routesTable.deletedAt)))
+    .limit(1);
   if (!route) return null;
 
   return { route, shareLink };

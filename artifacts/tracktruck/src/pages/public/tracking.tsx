@@ -216,7 +216,6 @@ export default function PublicTracking() {
           <h1 className="text-2xl font-bold text-slate-900 mb-2">Tracking Unavailable</h1>
           <p className="text-slate-500 text-sm">
             This tracking link is invalid, expired, or no longer active.
-            Check with your dispatcher for an updated link.
           </p>
         </div>
       </div>
