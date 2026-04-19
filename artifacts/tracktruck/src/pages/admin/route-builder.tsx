@@ -371,7 +371,7 @@ export default function RouteBuilder() {
     if (initializedRouteIdRef.current === existingRoute.id) return;
     initializedRouteIdRef.current = existingRoute.id;
 
-    setName(existingRoute.name);
+    setName(existingRoute.name.startsWith("UNFINISHED ROUTE") ? "" : existingRoute.name);
     setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
     setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
     setStops(existingRoute.stops.map(s => ({
@@ -501,35 +501,57 @@ export default function RouteBuilder() {
     };
   }, [routeId, existingRoute?.status, existingRoute?.shareToken]);
 
-  // --- Draft persistence (new routes only) ---
-  const DRAFT_KEY = 'tracktruck_route_draft';
-
-  // Restore draft on mount (new route only)
+  // --- Auto-save to DB (debounced) ---
   useEffect(() => {
-    if (routeId) return;
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { name?: string; start?: RoutePoint; end?: RoutePoint; stops?: Stop[] };
-      if (draft.name) setName(draft.name);
-      if (draft.start) setStart(draft.start);
-      if (draft.end) setEnd(draft.end);
-      if (draft.stops?.length) setStops(draft.stops);
-      toast({ title: "Draft restored", description: "Your unsaved route data has been recovered." });
-    } catch {
-      // ignore corrupt draft
+    // Check if anything has actually changed from the last known state
+    // For existing routes, we compare with existingRoute.
+    // For new routes, we check if start/end/stops or name is populated.
+    let isDirty = false;
+    if (routeId && existingRoute) {
+      if (!['draft', 'ready'].includes(existingRoute.status)) return;
+      isDirty = 
+        name !== existingRoute.name || 
+        start?.lat !== existingRoute.startLat || 
+        start?.lng !== existingRoute.startLng ||
+        end?.lat !== existingRoute.endLat ||
+        end?.lng !== existingRoute.endLng ||
+        stops.length !== existingRoute.stops.length;
+    } else if (!routeId) {
+      // For a brand new route, we are dirty if the user set a location or a name
+      isDirty = (!!name && name.trim().length > 0) || !!start || !!end || stops.length > 0;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  // Auto-save draft on every change (new route only)
-  useEffect(() => {
-    if (routeId) return;
-    if (!name && !start && !end && stops.length === 0) return;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ name, start, end, stops }));
-    } catch { /* ignore */ }
-  }, [name, start, end, stops, routeId]);
+    if (!isDirty) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const placeholderName = `UNFINISHED ROUTE`;
+        const payload = {
+          name: name.trim() || placeholderName,
+          startLat: start?.lat ?? 0,
+          startLng: start?.lng ?? 0,
+          endLat: end?.lat ?? 0,
+          endLng: end?.lng ?? 0,
+          truckSpeedMph: 60,
+          polyline,
+          speedProfile,
+        };
+
+        if (routeId) {
+          await updateMut.mutateAsync({ id: routeId, data: payload });
+        } else {
+          // IMPORTANT: Create the route in the DB and redirect to its new edit URL
+          const resp = await createMut.mutateAsync({ data: payload });
+          // Use replace: true so the "Back" button goes to Dashboard, not the empty /new page
+          setLocation(`/admin/routes/${resp.id}/edit`, { replace: true });
+        }
+      } catch (err) {
+        console.error("Auto-save failed", err);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [name, start, end, stops, polyline, speedProfile, routeId, existingRoute, updateMut, createMut, setLocation]);
 
   // Use a generation counter to discard stale async routing responses
   const routingGen = useRef(0);

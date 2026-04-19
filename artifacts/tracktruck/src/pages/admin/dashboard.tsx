@@ -14,9 +14,11 @@ import {
   useResumeRoute, 
   useDeleteRoute,
   useActivateRoute,
+  useCreateRoute,
   useAuthMe,
   ListRoutesStatus
 } from "@workspace/api-client-react";
+import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAppStore } from "@/store/use-app-store";
 import { FriendlyErrorDialog } from "@/components/common/FriendlyErrorDialog";
@@ -25,6 +27,7 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ListRoutesStatus | undefined>();
+  const [, setLocation] = useLocation();
   const { user, setAuthenticated } = useAppStore();
   const { toast } = useToast();
   
@@ -65,6 +68,26 @@ export default function Dashboard() {
   const pauseMut = usePauseRoute({ mutation: { onSuccess: onActionSuccess }});
   const resumeMut = useResumeRoute({ mutation: { onSuccess: onActionSuccess }});
   const deleteMut = useDeleteRoute({ mutation: { onSuccess: onActionSuccess }});
+  const createMut = useCreateRoute();
+
+  const handleCreateNew = async () => {
+    if (isQuotaReached) return;
+    try {
+      const resp = await createMut.mutateAsync({ 
+        data: { 
+          name: `Draft Route - ${format(new Date(), "MMM d, HH:mm")}`,
+          startLat: 0,
+          startLng: 0,
+          endLat: 0,
+          endLng: 0,
+          truckSpeedMph: 60
+        } 
+      } as any);
+      setLocation(`/admin/routes/${resp.id}/edit`);
+    } catch (e: any) {
+      toast({ title: "Error", description: "Failed to create a new draft route.", variant: "destructive" });
+    }
+  };
 
   const handleAction = async (action: 'activate'|'start'|'pause'|'resume'|'delete', id: number) => {
     try {
@@ -113,18 +136,10 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-foreground">Routes</h1>
           <p className="text-muted-foreground mt-1">Manage and track your fleet deliveries.</p>
         </div>
-        {isQuotaReached ? (
-          <div className="inline-flex items-center gap-2 px-5 py-2.5 bg-muted text-muted-foreground/50 rounded-xl font-semibold border border-border cursor-not-allowed grayscale shadow-none" title="Route limit reached. Deactivate or delete routes to create more.">
-            <Plus className="w-5 h-5 opacity-40" />
-            Create Route
-            <span className="ml-1 text-[10px] font-bold bg-muted-foreground/10 px-1.5 py-0.5 rounded uppercase">Locked</span>
-          </div>
-        ) : (
-          <Link href="/admin/routes/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-all">
-            <Plus className="w-5 h-5" />
-            Create Route
-          </Link>
-        )}
+        <Link href="/admin/routes/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-all">
+          <Plus className="w-5 h-5" />
+          Create Route
+        </Link>
       </div>
       
       {user?.role === 'user' && (
