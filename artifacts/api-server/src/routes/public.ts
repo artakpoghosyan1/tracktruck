@@ -26,7 +26,7 @@ function computeSnapshot(route: typeof routesTable.$inferSelect, simState: typeo
   if (!simState) return null;
 
   const polyline = (route.polyline as number[][]) || [];
-  const speedMs = (route.truckSpeedKmh * 1000) / 3600;
+  const speedMs = (route.truckSpeedMph * 1609.34) / 3600;
 
   let totalElapsedMs = simState.effectiveElapsedMs;
   if (route.status === "in_progress" && simState.startedAt) {

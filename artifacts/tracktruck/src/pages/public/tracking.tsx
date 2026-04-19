@@ -18,7 +18,7 @@ interface SnapshotData {
   lat: number | null;
   lng: number | null;
   bearing: number | null;
-  speedKmh?: number;
+  speedMph?: number;
 }
 
 export default function PublicTracking() {
@@ -277,8 +277,8 @@ export default function PublicTracking() {
               {activeSnapshot && (route as any).showSpeedPublic !== false && (
                 <div className="flex items-center gap-1.5">
                   <Gauge className="w-4 h-4 text-slate-400" />
-                  <span className="text-2xl font-bold text-slate-900 tabular-nums">{activeSnapshot.speedKmh ?? 0}</span>
-                  <span className="text-sm text-slate-400">km/h</span>
+                  <span className="text-2xl font-bold text-slate-900 tabular-nums">{activeSnapshot.speedMph ?? 0}</span>
+                  <span className="text-sm text-slate-400">mph</span>
                 </div>
               )}
             </div>
@@ -403,9 +403,9 @@ export default function PublicTracking() {
               <div className="flex items-center gap-1.5 shrink-0">
                 <Gauge className="w-4 h-4 text-slate-400" />
                 <span className="text-2xl font-bold text-slate-900 tabular-nums">
-                  {(activeSnapshot as SnapshotData | null)?.speedKmh ?? 0}
+                  {(activeSnapshot as SnapshotData | null)?.speedMph ?? 0}
                 </span>
-                <span className="text-sm font-normal text-slate-400">km/h</span>
+                <span className="text-sm font-normal text-slate-400">mph</span>
               </div>
             )}
           </div>

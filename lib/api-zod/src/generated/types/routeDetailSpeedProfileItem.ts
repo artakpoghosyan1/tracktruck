@@ -8,5 +8,5 @@
 
 export type RouteDetailSpeedProfileItem = {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 };

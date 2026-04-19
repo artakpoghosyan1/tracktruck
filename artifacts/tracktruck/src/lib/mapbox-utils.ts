@@ -18,7 +18,7 @@ export function straightLinePolyline(lat1: number, lng1: number, lat2: number, l
 
 export interface SpeedSegment {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 }
 
 export interface RouteOption {
@@ -37,9 +37,9 @@ function extractSpeedProfile(legs: any[]): SpeedSegment[] {
   for (const leg of legs) {
     for (const step of leg.steps ?? []) {
       if (step.distance > 0 && step.duration > 0) {
-        const speedKmh = (step.distance / step.duration) * 3.6;
-        if (isFinite(speedKmh) && speedKmh > 0) {
-          profile.push({ distanceM: step.distance, speedKmh });
+        const speedMph = (step.distance / step.duration) * 3600 / 1609.34;
+        if (isFinite(speedMph) && speedMph > 0) {
+          profile.push({ distanceM: step.distance, speedMph });
         }
       }
     }

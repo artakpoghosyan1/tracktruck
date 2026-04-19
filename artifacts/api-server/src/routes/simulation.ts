@@ -223,7 +223,8 @@ router.post("/routes/:id/recalculate", validate({ params: RecalculateRouteParams
 
   const polyline = (route.polyline as number[][]) || [];
   const distanceM = polyline.length > 1 ? totalPolylineDistance(polyline) : route.distanceM;
-  const estimatedDurationS = route.truckSpeedKmh > 0 ? (distanceM / 1000 / route.truckSpeedKmh) * 3600 : route.estimatedDurationS;
+  // truckSpeedMph is used here: distanceM / (mph * 1609.34) * 3600 gives seconds
+  const estimatedDurationS = route.truckSpeedMph > 0 ? (distanceM / (route.truckSpeedMph * 1609.34)) * 3600 : route.estimatedDurationS;
 
   await db.update(routesTable)
     .set({ distanceM, estimatedDurationS, updatedAt: new Date() })

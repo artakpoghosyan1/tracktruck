@@ -153,7 +153,7 @@ export const ListRoutesResponse = zod.object({
       startLng: zod.number(),
       endLat: zod.number(),
       endLng: zod.number(),
-      truckSpeedKmh: zod.number(),
+      truckSpeedMph: zod.number(),
       shareToken: zod.string().nullish(),
       shareLinkActive: zod.boolean(),
       createdAt: zod.date(),
@@ -170,7 +170,7 @@ export const ListRoutesResponse = zod.object({
 /**
  * @summary Create a new route
  */
-export const createRouteBodyTruckSpeedKmhDefault = 60;
+export const createRouteBodyTruckSpeedMphDefault = 60;
 export const createRouteBodyPolylineItemMin = 2;
 export const createRouteBodyPolylineItemMax = 2;
 
@@ -180,7 +180,7 @@ export const CreateRouteBody = zod.object({
   startLng: zod.number(),
   endLat: zod.number(),
   endLng: zod.number(),
-  truckSpeedKmh: zod.number().default(createRouteBodyTruckSpeedKmhDefault),
+  truckSpeedMph: zod.number().default(createRouteBodyTruckSpeedMphDefault),
   polyline: zod
     .array(
       zod
@@ -193,7 +193,7 @@ export const CreateRouteBody = zod.object({
     .array(
       zod.object({
         distanceM: zod.number(),
-        speedKmh: zod.number(),
+        speedMph: zod.number(),
       }),
     )
     .optional(),
@@ -224,7 +224,7 @@ export const GetRouteResponse = zod.object({
   startLng: zod.number(),
   endLat: zod.number(),
   endLng: zod.number(),
-  truckSpeedKmh: zod.number(),
+  truckSpeedMph: zod.number(),
   polyline: zod.array(
     zod
       .array(zod.number())
@@ -235,7 +235,7 @@ export const GetRouteResponse = zod.object({
     .array(
       zod.object({
         distanceM: zod.number(),
-        speedKmh: zod.number(),
+        speedMph: zod.number(),
       }),
     )
     .optional(),
@@ -277,7 +277,7 @@ export const UpdateRouteBody = zod.object({
   startLng: zod.number().optional(),
   endLat: zod.number().optional(),
   endLng: zod.number().optional(),
-  truckSpeedKmh: zod.number().optional(),
+  truckSpeedMph: zod.number().optional(),
   polyline: zod
     .array(
       zod
@@ -290,7 +290,7 @@ export const UpdateRouteBody = zod.object({
     .array(
       zod.object({
         distanceM: zod.number(),
-        speedKmh: zod.number(),
+        speedMph: zod.number(),
       }),
     )
     .optional(),
@@ -314,7 +314,7 @@ export const UpdateRouteResponse = zod.object({
   startLng: zod.number(),
   endLat: zod.number(),
   endLng: zod.number(),
-  truckSpeedKmh: zod.number(),
+  truckSpeedMph: zod.number(),
   polyline: zod.array(
     zod
       .array(zod.number())
@@ -325,7 +325,7 @@ export const UpdateRouteResponse = zod.object({
     .array(
       zod.object({
         distanceM: zod.number(),
-        speedKmh: zod.number(),
+        speedMph: zod.number(),
       }),
     )
     .optional(),
@@ -611,7 +611,7 @@ export const GetPublicTrackResponse = zod.object({
       lat: zod.number().nullish(),
       lng: zod.number().nullish(),
       bearing: zod.number().nullish(),
-      speedKmh: zod.number().optional(),
+      speedMph: zod.number().optional(),
       atStopName: zod.string().nullish(),
     })
     .optional(),
@@ -645,7 +645,7 @@ export const GetPublicTrackStateResponse = zod.object({
   lat: zod.number().nullish(),
   lng: zod.number().nullish(),
   bearing: zod.number().nullish(),
-  speedKmh: zod.number().optional(),
+  speedMph: zod.number().optional(),
   atStopName: zod.string().nullish(),
 });
 

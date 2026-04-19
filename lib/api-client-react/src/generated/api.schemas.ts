@@ -72,7 +72,7 @@ export interface AuthResponse {
 
 export type CreateRouteRequestSpeedProfileItem = {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 };
 
 export interface CreateRouteRequest {
@@ -81,14 +81,14 @@ export interface CreateRouteRequest {
   startLng: number;
   endLat: number;
   endLng: number;
-  truckSpeedKmh?: number;
+  truckSpeedMph?: number;
   polyline?: number[][];
   speedProfile?: CreateRouteRequestSpeedProfileItem[];
 }
 
 export type UpdateRouteRequestSpeedProfileItem = {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 };
 
 export interface UpdateRouteRequest {
@@ -97,7 +97,7 @@ export interface UpdateRouteRequest {
   startLng?: number;
   endLat?: number;
   endLng?: number;
-  truckSpeedKmh?: number;
+  truckSpeedMph?: number;
   polyline?: number[][];
   speedProfile?: UpdateRouteRequestSpeedProfileItem[];
 }
@@ -122,7 +122,7 @@ export interface RouteListItem {
   startLng: number;
   endLat: number;
   endLng: number;
-  truckSpeedKmh: number;
+  truckSpeedMph: number;
   shareToken?: string | null;
   shareLinkActive: boolean;
   createdAt: string;
@@ -145,7 +145,7 @@ export const RouteDetailStatus = {
 
 export type RouteDetailSpeedProfileItem = {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 };
 
 export interface RouteStop {
@@ -167,7 +167,7 @@ export interface RouteDetail {
   startLng: number;
   endLat: number;
   endLng: number;
-  truckSpeedKmh: number;
+  truckSpeedMph: number;
   polyline: number[][];
   speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;
@@ -273,7 +273,7 @@ export interface LiveSnapshotResponse {
   lat?: number | null;
   lng?: number | null;
   bearing?: number | null;
-  speedKmh?: number;
+  speedMph?: number;
   atStopName?: string | null;
 }
 

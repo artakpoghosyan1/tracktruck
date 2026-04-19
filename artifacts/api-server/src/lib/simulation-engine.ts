@@ -8,7 +8,7 @@ const DB_SAVE_INTERVAL_TICKS = 5;
 
 interface SpeedSegment {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 }
 
 interface StopEntry {
@@ -27,11 +27,11 @@ function trimSpeedProfile(profile: SpeedSegment[], fromDistM: number): SpeedSegm
   const result: SpeedSegment[] = [];
   let remaining = fromDistM;
   for (const seg of profile) {
-    if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
+    if (!isFinite(seg.speedMph) || seg.speedMph <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
     if (remaining >= seg.distanceM) {
       remaining -= seg.distanceM;
     } else if (remaining > 0) {
-      result.push({ distanceM: seg.distanceM - remaining, speedKmh: seg.speedKmh });
+      result.push({ distanceM: seg.distanceM - remaining, speedMph: seg.speedMph });
       remaining = 0;
     } else {
       result.push(seg);
@@ -41,44 +41,44 @@ function trimSpeedProfile(profile: SpeedSegment[], fromDistM: number): SpeedSegm
 }
 
 /** How many seconds does it take to travel `distanceM` metres using the profile? */
-function timeForDistance(distanceM: number, profile: SpeedSegment[], fallbackKmh: number): number {
+function timeForDistance(distanceM: number, profile: SpeedSegment[], fallbackMph: number): number {
   let remaining = distanceM;
   let totalS = 0;
   for (const seg of profile) {
-    if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
-    const speedMs = (seg.speedKmh * 1000) / 3600;
+    if (!isFinite(seg.speedMph) || seg.speedMph <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
+    const speedMs = (seg.speedMph * 1609.34) / 3600;
     const used = Math.min(seg.distanceM, remaining);
     totalS += used / speedMs;
     remaining -= used;
     if (remaining <= 0) return totalS;
   }
   if (remaining > 0) {
-    totalS += remaining / ((fallbackKmh * 1000) / 3600);
+    totalS += remaining / ((fallbackMph * 1609.34) / 3600);
   }
   return totalS;
 }
 
-/** Current speed (km/h) at a given distance along the route */
-function speedAtDistanceM(profile: SpeedSegment[], distanceM: number, fallbackKmh: number): number {
-  if (!profile || profile.length === 0) return fallbackKmh;
+/** Current speed (mph) at a given distance along the route */
+function speedAtDistanceM(profile: SpeedSegment[], distanceM: number, fallbackMph: number): number {
+  if (!profile || profile.length === 0) return fallbackMph;
   const remaining = trimSpeedProfile(profile, distanceM);
-  return remaining.length > 0 ? remaining[0].speedKmh : fallbackKmh;
+  return remaining.length > 0 ? remaining[0].speedMph : fallbackMph;
 }
 
 /** How many metres does the truck travel in `elapsedS` seconds using the profile? */
 function computeDistanceWithSpeedProfile(
   elapsedS: number,
   speedProfile: SpeedSegment[],
-  fallbackSpeedKmh: number,
+  fallbackSpeedMph: number,
 ): number {
   if (!speedProfile || speedProfile.length === 0) {
-    return elapsedS * ((fallbackSpeedKmh * 1000) / 3600);
+    return elapsedS * ((fallbackSpeedMph * 1609.34) / 3600);
   }
   let remainingS = elapsedS;
   let totalDistanceM = 0;
   for (const seg of speedProfile) {
-    if (!isFinite(seg.speedKmh) || seg.speedKmh <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
-    const segSpeedMs = (seg.speedKmh * 1000) / 3600;
+    if (!isFinite(seg.speedMph) || seg.speedMph <= 0 || !isFinite(seg.distanceM) || seg.distanceM <= 0) continue;
+    const segSpeedMs = (seg.speedMph * 1609.34) / 3600;
     const segTimeS = seg.distanceM / segSpeedMs;
     if (remainingS <= segTimeS) {
       totalDistanceM += remainingS * segSpeedMs;
@@ -88,7 +88,7 @@ function computeDistanceWithSpeedProfile(
     remainingS -= segTimeS;
   }
   if (remainingS > 0) {
-    totalDistanceM += remainingS * ((fallbackSpeedKmh * 1000) / 3600);
+    totalDistanceM += remainingS * ((fallbackSpeedMph * 1609.34) / 3600);
   }
   return totalDistanceM;
 }
@@ -99,33 +99,33 @@ function computeDistanceWithSpeedProfile(
 
 /**
  * Scale the speed profile so the truck actually moves at the pace the admin
- * configured via `truckSpeedKmh`.
+ * configured via `truckSpeedMph`.
  *
  * The raw Mapbox / OSRM profile contains realistic traffic-modelled speeds
- * (often 10-30 km/h in urban areas).  Even when the distance-weighted average
+ * (often 10-20 mph in urban areas).  Even when the distance-weighted average
  * is fine, individual slow segments dominate the *time* budget and make the
  * truck crawl for the first portion of the route.
  *
  * Strategy:
- *  1. Enforce a per-segment minimum speed floor (50% of targetAvgKmh) so no
+ *  1. Enforce a per-segment minimum speed floor (50% of targetAvgMph) so no
  *     segment is absurdly slow.
  *  2. After flooring, proportionally scale all segments so the distance-
- *     weighted average equals `targetAvgKmh`.
+ *     weighted average equals `targetAvgMph`.
  *
  * This preserves relative variation (highways stay faster than urban) while
- * eliminating the 10-30 km/h crawl problem.
+ * eliminating the crawl problem.
  */
-function scaleSpeedProfile(profile: SpeedSegment[], targetAvgKmh: number): SpeedSegment[] {
-  if (!profile || profile.length === 0 || targetAvgKmh <= 0) return profile;
+function scaleSpeedProfile(profile: SpeedSegment[], targetAvgMph: number): SpeedSegment[] {
+  if (!profile || profile.length === 0 || targetAvgMph <= 0) return profile;
 
-  const minFloorKmh = targetAvgKmh * 0.75; // no segment slower than 75% of target
+  const minFloorMph = targetAvgMph * 0.75; // no segment slower than 75% of target
 
   // Step 1: apply the floor
   const floored = profile.map(seg => ({
     distanceM: seg.distanceM,
-    speedKmh: (!isFinite(seg.speedKmh) || seg.speedKmh <= 0)
-      ? targetAvgKmh
-      : Math.max(seg.speedKmh, minFloorKmh),
+    speedMph: (!isFinite(seg.speedMph) || seg.speedMph <= 0)
+      ? targetAvgMph
+      : Math.max(seg.speedMph, minFloorMph),
   }));
 
   // Step 2: compute the distance-weighted average after flooring
@@ -134,22 +134,22 @@ function scaleSpeedProfile(profile: SpeedSegment[], targetAvgKmh: number): Speed
   for (const seg of floored) {
     if (seg.distanceM <= 0) continue;
     totalDist += seg.distanceM;
-    totalTimeS += seg.distanceM / (seg.speedKmh / 3.6);
+    totalTimeS += seg.distanceM / (seg.speedMph * 1609.34 / 3600);
   }
 
   if (totalDist <= 0 || totalTimeS <= 0) return floored;
 
-  const flooredAvgKmh = (totalDist / totalTimeS) * 3.6;
-  if (flooredAvgKmh <= 0 || !isFinite(flooredAvgKmh)) return floored;
+  const flooredAvgMph = (totalDist / totalTimeS) * 3600 / 1609.34;
+  if (flooredAvgMph <= 0 || !isFinite(flooredAvgMph)) return floored;
 
   // If already at or above target after flooring, return as-is
-  if (flooredAvgKmh >= targetAvgKmh) return floored;
+  if (flooredAvgMph >= targetAvgMph) return floored;
 
   // Step 3: proportionally scale to hit the target average
-  const scaleFactor = targetAvgKmh / flooredAvgKmh;
+  const scaleFactor = targetAvgMph / flooredAvgMph;
   return floored.map(seg => ({
     distanceM: seg.distanceM,
-    speedKmh: seg.speedKmh * scaleFactor,
+    speedMph: seg.speedMph * scaleFactor,
   }));
 }
 
@@ -175,14 +175,14 @@ function bearingDiffDeg(a: number, b: number): number {
 
 /**
  * Analyse the polyline to produce deterministic "virtual" traffic-light stops
- * at sharp turns on urban road segments (speed < 80 km/h).
+ * at sharp turns on urban road segments (speed < 50 mph).
  * Only stops AHEAD of `aheadOfDistM` are returned, so existing routes don't
  * jump backwards when the engine first applies these events.
  */
 function buildIntersectionStops(
   polyline: number[][],
   speedProfile: SpeedSegment[],
-  fallbackKmh: number,
+  fallbackMph: number,
   aheadOfDistM: number,
 ): StopEntry[] {
   const stops: StopEntry[] = [];
@@ -198,8 +198,8 @@ function buildIntersectionStops(
     if (cumDist - lastEventDist < 150) continue;
 
     // Skip highways
-    const localSpeed = speedAtDistanceM(speedProfile, cumDist, fallbackKmh);
-    if (localSpeed >= 80) continue;
+    const localSpeed = speedAtDistanceM(speedProfile, cumDist, fallbackMph);
+    if (localSpeed >= 50) continue;
 
     const bearingIn = computeBearingDeg(polyline[i - 1], polyline[i]);
     const bearingOut = computeBearingDeg(polyline[i], polyline[i + 1]);
@@ -310,7 +310,7 @@ function computePositionWithStops(
   polyline: number[][],
   sortedStops: StopEntry[],
   speedProfile: SpeedSegment[],
-  fallbackSpeedKmh: number,
+  fallbackSpeedMph: number,
   speedMultiplier: number = 1.0,
 ): PositionWithStop {
   let remainingS = totalElapsedS;
@@ -322,14 +322,14 @@ function computePositionWithStops(
 
     // Time to drive this leg at natural speed
     const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
-    const legTimeS = timeForDistance(legDistM, trimmedProfile, fallbackSpeedKmh);
+    const legTimeS = timeForDistance(legDistM, trimmedProfile, fallbackSpeedMph);
     // Real time for this leg = natural time / multiplier (faster multiplier = less real time)
     const realLegTimeS = legTimeS / speedMultiplier;
 
     if (remainingS < realLegTimeS) {
       // Still driving toward this stop — scale remaining time by multiplier
       const virtualDrivingS = remainingS * speedMultiplier;
-      const additionalDistM = computeDistanceWithSpeedProfile(virtualDrivingS, trimmedProfile, fallbackSpeedKmh);
+      const additionalDistM = computeDistanceWithSpeedProfile(virtualDrivingS, trimmedProfile, fallbackSpeedMph);
       const pos = positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM);
       return { ...pos, atStopName: null };
     }
@@ -349,7 +349,7 @@ function computePositionWithStops(
   // Past all stops — drive to destination
   const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
   const virtualDrivingS = remainingS * speedMultiplier;
-  const additionalDistM = computeDistanceWithSpeedProfile(virtualDrivingS, trimmedProfile, fallbackSpeedKmh);
+  const additionalDistM = computeDistanceWithSpeedProfile(virtualDrivingS, trimmedProfile, fallbackSpeedMph);
   const pos = positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM);
   return { ...pos, atStopName: null };
 }
@@ -391,9 +391,9 @@ async function tick() {
     const polyline = (route.polyline as number[][]) || [];
 
     // Scale the OSRM/Mapbox speed profile so that its distance-weighted
-    // average matches truckSpeedKmh.  Raw profiles contain realistic traffic
-    // speeds (often 20-40 km/h in cities), which made the truck crawl.
-    const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedKmh);
+    // average matches truckSpeedMph.  Raw profiles contain realistic traffic
+    // speeds (often 20-40 mph in cities), which made the truck crawl.
+    const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedMph);
 
     // Load stops for this route
     const dbStops = await db
@@ -413,7 +413,7 @@ async function tick() {
     // Only inject stops AHEAD of the truck's last known position so that
     // enabling this for an already-running route doesn't cause a backwards jump.
     const traveledM = simState.distanceTraveledM ?? 0;
-    const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedKmh, traveledM);
+    const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedMph, traveledM);
 
     // Merge and sort all stops by distance
     const sortedStops: StopEntry[] = [...realStops, ...trafficStops]
@@ -430,7 +430,7 @@ async function tick() {
       polyline,
       sortedStops,
       speedProfile,
-      route.truckSpeedKmh,
+      route.truckSpeedMph,
       speedMultiplier,
     );
 
@@ -472,7 +472,7 @@ async function tick() {
     // -----------------------------------------------------------------------
 
     const RAMP_UP_S = 8;
-    const baseSpeedKmh = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
+    const baseSpeedMph = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedMph);
 
     // --- Braking factor: decelerate when within 220 m of any upcoming stop or route end ---
     const routeTotalDistM = route.distanceM > 0
@@ -519,13 +519,13 @@ async function tick() {
     // Combined ramp: both stop-ramp and admin-ramp must complete for full speed
     const rampFactor = isAtAnyStop ? 0 : Math.min(stopRampFactor, adminRampFactor);
 
-    const MAX_ALLOWED_SPEED_KMH = 120;
-    const targetSpeedKmh = isAtAnyStop
+    const MAX_ALLOWED_SPEED_MPH = 75;
+    const targetSpeedMph = isAtAnyStop
       ? 0
-      : Math.min(MAX_ALLOWED_SPEED_KMH, Math.max(0, baseSpeedKmh * fluctMult * combinedBrakeFactor));
-    const currentSpeedKmh = route.customDurationS 
-      ? Math.round(targetSpeedKmh * rampFactor * speedMultiplier) 
-      : Math.round(targetSpeedKmh * rampFactor);
+      : Math.min(MAX_ALLOWED_SPEED_MPH, Math.max(0, baseSpeedMph * fluctMult * combinedBrakeFactor));
+    const currentSpeedMph = route.customDurationS 
+      ? Math.round(targetSpeedMph * rampFactor * speedMultiplier) 
+      : Math.round(targetSpeedMph * rampFactor);
 
     // -----------------------------------------------------------------------
     // Display position (edge-offset for real named stops only)
@@ -564,7 +564,7 @@ async function tick() {
       lat: displayLat,
       lng: displayLng,
       bearing: pos.bearing,
-      speedKmh: currentSpeedKmh,
+      speedMph: currentSpeedMph,
     };
 
     const shareLinks = await db

@@ -17,7 +17,7 @@ export interface RouteDetail {
   startLng: number;
   endLat: number;
   endLng: number;
-  truckSpeedKmh: number;
+  truckSpeedMph: number;
   polyline: number[][];
   speedProfile?: RouteDetailSpeedProfileItem[];
   distanceM: number;

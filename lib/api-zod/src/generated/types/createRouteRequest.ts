@@ -13,7 +13,7 @@ export interface CreateRouteRequest {
   startLng: number;
   endLat: number;
   endLng: number;
-  truckSpeedKmh?: number;
+  truckSpeedMph?: number;
   polyline?: number[][];
   speedProfile?: CreateRouteRequestSpeedProfileItem[];
 }

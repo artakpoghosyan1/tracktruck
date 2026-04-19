@@ -8,5 +8,5 @@
 
 export type UpdateRouteRequestSpeedProfileItem = {
   distanceM: number;
-  speedKmh: number;
+  speedMph: number;
 };

@@ -15,7 +15,7 @@ export interface RouteListItem {
   startLng: number;
   endLat: number;
   endLng: number;
-  truckSpeedKmh: number;
+  truckSpeedMph: number;
   shareToken?: string | null;
   shareLinkActive: boolean;
   createdAt: Date;

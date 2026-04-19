@@ -229,7 +229,7 @@ export default function RouteBuilder() {
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
 
   // Live truck position for in-progress routes
-  const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedKmh: number; atStopName: string | null } | null>(null);
+  const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedMph: number; atStopName: string | null } | null>(null);
 
   // Stop countdown: track when truck arrived at current stop
   const [stopArrivalTime, setStopArrivalTime] = useState<number | null>(null);
@@ -297,7 +297,7 @@ export default function RouteBuilder() {
   const isCompleted = existingRoute?.status === 'completed';
   const routeLocked = (isLiveRoute && !routeChangeMode) || isCompleted;
   const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
-  const liveSpeedKmh = liveSnapshot?.speedKmh ?? null;
+  const liveSpeedMph = liveSnapshot?.speedMph ?? null;
 
   const { user } = useAppStore();
   const isUser = user?.role === 'user';
@@ -341,7 +341,7 @@ export default function RouteBuilder() {
             name: name.trim(),
             startLat: start?.lat, startLng: start?.lng,
             endLat: end?.lat, endLng: end?.lng,
-            truckSpeedKmh: 80,
+            truckSpeedMph: 60,
             polyline,
             speedProfile,
           };
@@ -442,7 +442,7 @@ export default function RouteBuilder() {
               lat: data.snapshot.lat,
               lng: data.snapshot.lng,
               bearing: data.snapshot.bearing ?? 0,
-              speedKmh: data.snapshot.speedKmh ?? 0,
+              speedMph: data.snapshot.speedMph ?? 0,
               atStopName: data.snapshot.atStopName || null,
             });
           }
@@ -477,7 +477,7 @@ export default function RouteBuilder() {
               lat: data.lat,
               lng: data.lng,
               bearing: data.bearing ?? 0,
-              speedKmh: data.speedKmh ?? 0,
+              speedMph: data.speedMph ?? 0,
               atStopName: data.atStopName || null,
             }));
           } else if (data.type === "route_updated") {
@@ -763,7 +763,7 @@ export default function RouteBuilder() {
         name: name.trim(),
         startLat: start.lat, startLng: start.lng,
         endLat: end.lat, endLng: end.lng,
-        truckSpeedKmh: 80,
+        truckSpeedMph: 60,
         polyline,
         speedProfile,
         // customDurationS is sent only on create; for existing routes, use Update Speed button
@@ -823,7 +823,10 @@ export default function RouteBuilder() {
   };
 
   const fmt = {
-    dist: (m: number) => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`,
+    dist: (m: number) => {
+      const mi = m / 1609.34;
+      return mi >= 1 ? `${mi.toFixed(1)} mi` : `${Math.round(m / 0.3048)} ft`;
+    },
     dur: (s: number) => {
       const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
       return h > 0 ? `${h}h ${m}m` : `${m} min`;
@@ -869,11 +872,11 @@ export default function RouteBuilder() {
           )}
 
           {/* Live speed badge */}
-          {['in_progress', 'paused'].includes(existingRoute?.status ?? '') && liveSpeedKmh !== null && (
+          {['in_progress', 'paused'].includes(existingRoute?.status ?? '') && liveSpeedMph !== null && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl">
               <Gauge className="w-4 h-4 text-emerald-600" />
-              <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedKmh}</span>
-              <span className="text-xs text-emerald-600">km/h</span>
+              <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedMph}</span>
+              <span className="text-xs text-emerald-600">mph</span>
             </div>
           )}
 
@@ -1108,7 +1111,7 @@ export default function RouteBuilder() {
                             'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
                           },
                           body: JSON.stringify({
-                            truckSpeedKmh: 80,
+                            truckSpeedMph: 60,
                             customDurationS: customDurationMinutes > 0 ? customDurationMinutes * 60 : null,
                             customDurationEnabled: useCustomDuration,
                             showSpeedPublic,
