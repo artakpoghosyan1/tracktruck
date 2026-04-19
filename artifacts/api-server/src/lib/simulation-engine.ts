@@ -99,7 +99,7 @@ function computeDistanceWithSpeedProfile(
 
 /**
  * Scale the speed profile so the truck actually moves at the pace the admin
- * configured via `truckSpeedMph`.
+ * configured via `truckSpeedKmh`.
  *
  * The raw Mapbox / OSRM profile contains realistic traffic-modelled speeds
  * (often 10-20 mph in urban areas).  Even when the distance-weighted average
@@ -391,9 +391,9 @@ async function tick() {
     const polyline = (route.polyline as number[][]) || [];
 
     // Scale the OSRM/Mapbox speed profile so that its distance-weighted
-    // average matches truckSpeedMph.  Raw profiles contain realistic traffic
+    // average matches truckSpeedKmh.  Raw profiles contain realistic traffic
     // speeds (often 20-40 mph in cities), which made the truck crawl.
-    const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedMph);
+    const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedKmh);
 
     // Load stops for this route
     const dbStops = await db
@@ -413,7 +413,7 @@ async function tick() {
     // Only inject stops AHEAD of the truck's last known position so that
     // enabling this for an already-running route doesn't cause a backwards jump.
     const traveledM = simState.distanceTraveledM ?? 0;
-    const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedMph, traveledM);
+    const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedKmh, traveledM);
 
     // Merge and sort all stops by distance
     const sortedStops: StopEntry[] = [...realStops, ...trafficStops]
@@ -430,7 +430,7 @@ async function tick() {
       polyline,
       sortedStops,
       speedProfile,
-      route.truckSpeedMph,
+      route.truckSpeedKmh,
       speedMultiplier,
     );
 
@@ -472,7 +472,7 @@ async function tick() {
     // -----------------------------------------------------------------------
 
     const RAMP_UP_S = 8;
-    const baseSpeedMph = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedMph);
+    const baseSpeedMph = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedKmh);
 
     // --- Braking factor: decelerate when within 220 m of any upcoming stop or route end ---
     const routeTotalDistM = route.distanceM > 0
