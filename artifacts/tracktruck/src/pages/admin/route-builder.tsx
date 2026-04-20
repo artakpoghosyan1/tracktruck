@@ -392,7 +392,8 @@ export default function RouteBuilder() {
 
   // Restore the saved route as a single option
   useEffect(() => {
-    if (existingRoute?.polyline?.length) {
+    if (!existingRoute) return;
+    if (existingRoute.polyline?.length) {
       setRouteOptions([{
         polyline: existingRoute.polyline,
         distanceM: existingRoute.distanceM || 0,
