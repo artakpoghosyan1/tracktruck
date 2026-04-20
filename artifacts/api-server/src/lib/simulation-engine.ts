@@ -604,7 +604,6 @@ async function tick() {
         })
         .where(eq(simulationStatesTable.routeId, route.id));
 
-      await db.update(shareLinksTable).set({ active: false }).where(eq(shareLinksTable.routeId, route.id));
       continue;
     }
 

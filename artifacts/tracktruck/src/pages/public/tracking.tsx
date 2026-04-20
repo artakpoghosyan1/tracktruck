@@ -35,9 +35,9 @@ export default function PublicTracking() {
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
   const lastGeocodeRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
-  // Clear live data if route is not in progress
+  // Keep snapshot for completed routes so marker stays visible
   useEffect(() => {
-    if (route && !['in_progress', 'paused'].includes(route.status)) {
+    if (route && !['in_progress', 'paused', 'completed'].includes(route.status)) {
       setSnapshot(null);
       setMarkerPos(null);
       markerPosRef.current = null;
@@ -157,8 +157,15 @@ export default function PublicTracking() {
 
   // --- Reverse Geocoding for current address ---
   useEffect(() => {
-    if (!mapboxToken || !activeSnapshot?.lat || !activeSnapshot?.lng || route?.status !== "in_progress") {
-      if (route?.status !== "in_progress") setCurrentAddress(null);
+    if (!mapboxToken || !activeSnapshot?.lat || !activeSnapshot?.lng) {
+      return;
+    }
+
+    const isLive = route?.status === "in_progress";
+    const isCompleted = route?.status === "completed";
+
+    if (!isLive && !isCompleted) {
+      setCurrentAddress(null);
       return;
     }
 
@@ -222,19 +229,7 @@ export default function PublicTracking() {
     );
   }
 
-  if (route.status === 'completed' || activeSnapshot?.status === 'completed') {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center border border-slate-100">
-          <div className="w-20 h-20 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
-            <CheckCircle2 className="w-10 h-10" />
-          </div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-3">Delivery Complete!</h1>
-          <p className="text-slate-500">The truck has successfully reached its destination.</p>
-        </div>
-      </div>
-    );
-  }
+
 
   const isLive = route.status === 'in_progress';
 
@@ -341,6 +336,11 @@ export default function PublicTracking() {
           </div>
         </div>
         <div className="flex items-center gap-2 pointer-events-auto">
+          {route.status === 'completed' && (
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-white bg-emerald-600 px-3 py-1.5 rounded-full shadow-lg">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Arrived
+            </div>
+          )}
           {isLive && wsConnected && (
             <div className="flex items-center gap-1.5 text-xs font-semibold text-white bg-emerald-500/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-lg">
               <span className="w-2 h-2 rounded-full bg-white animate-pulse" /> Live
@@ -391,7 +391,7 @@ export default function PublicTracking() {
             <div className="flex items-center gap-2">
               <span className="relative flex h-2.5 w-2.5 shrink-0">
                 {isLive && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
-                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : (route.status === 'completed' ? 'bg-emerald-600' : 'bg-amber-500')}`} />
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate max-w-[200px]">
                 {currentAddress || 'Locating truck...'}

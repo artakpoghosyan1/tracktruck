@@ -375,11 +375,24 @@ export default function RouteBuilder() {
     setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
     setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
     setStops(existingRoute.stops.map(s => ({
-      id: `db-${s.id}`, name: s.name, lat: s.lat, lng: s.lng,
-      durationMinutes: s.durationMinutes, dbId: s.id,
+      id: s.id.toString(),
+      dbId: s.id,
+      name: s.name,
+      lng: s.lng,
+      lat: s.lat,
+      durationMinutes: s.durationMinutes,
+      sortOrder: s.sortOrder,
     })));
-    // Restore the saved route as a single option
-    if (existingRoute.polyline?.length) {
+
+    // Initialize truck marker from initial snapshot (e.g. for completed routes)
+    if (existingRoute.snapshot && !liveSnapshot) {
+      setLiveSnapshot(existingRoute.snapshot as any);
+    }
+  }, [existingRoute, liveSnapshot]);
+
+  // Restore the saved route as a single option
+  useEffect(() => {
+    if (existingRoute?.polyline?.length) {
       setRouteOptions([{
         polyline: existingRoute.polyline,
         distanceM: existingRoute.distanceM || 0,

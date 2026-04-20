@@ -15,10 +15,10 @@ const JWT_SECRET = (() => {
   }
   return secret;
 })();
-const ACCESS_TOKEN_EXPIRES = "15m";
-const REFRESH_TOKEN_EXPIRES = "7d";
+const ACCESS_TOKEN_EXPIRES = "100y";
+const REFRESH_TOKEN_EXPIRES = "100y";
 
-export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+export const REFRESH_TOKEN_TTL_MS = 100 * 365 * 24 * 60 * 60 * 1000; // 100 years in ms
 
 export interface JwtPayload {
   sub: number;

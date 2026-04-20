@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ilike, desc, asc, isNull, sql, count } from "drizzle-orm";
 import { db, routesTable, routeStopsTable, shareLinksTable, simulationStatesTable } from "@workspace/db";
+import { positionAlongPolyline } from "../lib/geo";
 import { broadcastToToken, broadcastToRoute } from "./ws";
 import {
   ListRoutesQueryParams,
@@ -180,12 +181,20 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     return;
   }
 
-  const [stops, shareLinks] = await Promise.all([
+  const [stops, shareLinks, simStates] = await Promise.all([
     db.select().from(routeStopsTable).where(eq(routeStopsTable.routeId, id)).orderBy(asc(routeStopsTable.sortOrder)),
     db.select().from(shareLinksTable).where(and(eq(shareLinksTable.routeId, id), eq(shareLinksTable.active, true))).limit(1),
+    db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, id)).limit(1),
   ]);
 
-  const shareLink = shareLinks[0];
+  const simState = simStates[0];
+  const snapshot = simState ? {
+    routeId: id,
+    status: route.status,
+    ...positionAlongPolyline((route.polyline as number[][]) || [], simState.distanceTraveledM || 0),
+    distanceTraveledM: simState.distanceTraveledM,
+    progressPercent: simState.progressPercent,
+  } : null;
 
   res.json({
     id: route.id,
@@ -202,6 +211,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     estimatedDurationS: route.estimatedDurationS,
     shareToken: shareLink?.token ?? null,
     shareLinkActive: shareLink?.active ?? false,
+    snapshot,
     lastActivationDate: null,
     stops: stops.map((s) => ({
       id: s.id,
