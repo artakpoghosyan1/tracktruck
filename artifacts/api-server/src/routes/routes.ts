@@ -187,6 +187,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, id)).limit(1),
   ]);
 
+  const shareLink = shareLinks[0];
   const simState = simStates[0];
   const snapshot = simState ? {
     routeId: id,
