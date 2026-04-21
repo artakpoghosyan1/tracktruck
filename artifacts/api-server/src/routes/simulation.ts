@@ -12,6 +12,7 @@ import {
 import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
 import { totalPolylineDistance } from "../lib/geo";
+import { invalidateRouteCache } from "../lib/simulation-engine";
 
 const router: IRouter = Router();
 
@@ -81,6 +82,8 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
       .where(eq(simulationStatesTable.routeId, routeId));
   }
 
+  invalidateRouteCache(routeId);
+
   res.json({
     routeId,
     status: "ready",
@@ -143,6 +146,8 @@ router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (
       .where(eq(simulationStatesTable.routeId, routeId));
   }
 
+  invalidateRouteCache(routeId);
+
   res.json({
     routeId,
     status: "in_progress",
@@ -179,6 +184,8 @@ router.post("/routes/:id/pause", validate({ params: PauseRouteParams }), async (
     .set({ pausedAt: now, startedAt: null, effectiveElapsedMs: totalElapsedMs, updatedAt: now })
     .where(eq(simulationStatesTable.routeId, routeId));
 
+  invalidateRouteCache(routeId);
+
   res.json({ routeId, status: "paused", effectiveElapsedMs: totalElapsedMs });
 });
 
@@ -202,6 +209,8 @@ router.post("/routes/:id/resume", validate({ params: ResumeRouteParams }), async
   await db.update(simulationStatesTable)
     .set({ startedAt: now, pausedAt: null, updatedAt: now })
     .where(eq(simulationStatesTable.routeId, routeId));
+
+  invalidateRouteCache(routeId);
 
   res.json({ routeId, status: "in_progress" });
 });
@@ -229,6 +238,8 @@ router.post("/routes/:id/recalculate", validate({ params: RecalculateRouteParams
   await db.update(routesTable)
     .set({ distanceM, estimatedDurationS, updatedAt: new Date() })
     .where(eq(routesTable.id, routeId));
+
+  invalidateRouteCache(routeId);
 
   res.json({ routeId, distanceM, estimatedDurationS });
 });

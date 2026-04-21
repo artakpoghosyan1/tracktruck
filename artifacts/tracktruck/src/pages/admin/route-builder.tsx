@@ -151,11 +151,12 @@ const AnimatedTruckMarker = memo(({ snapshot }: {
 
 AnimatedTruckMarker.displayName = 'AnimatedTruckMarker';
 
-function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, atStopName, countdownSec }: {
+function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, onBlurDuration, atStopName, countdownSec }: {
   stop: Stop; index: number;
   onRemove: (id: string) => void;
   onChangeName: (id: string, val: string) => void;
   onChangeDuration: (id: string, val: number) => void;
+  onBlurDuration: (id: string, val: number) => void;
   atStopName: string | null;
   countdownSec: number | null;
 }) {
@@ -184,6 +185,7 @@ function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuratio
               type="number"
               value={stop.durationMinutes}
               onChange={(e) => onChangeDuration(stop.id, Number(e.target.value))}
+              onBlur={(e) => onBlurDuration(stop.id, Number(e.target.value))}
               className="w-10 bg-transparent outline-none border-b border-dashed border-muted-foreground/40 text-center"
               min={1}
             />
@@ -385,8 +387,8 @@ export default function RouteBuilder() {
     })));
 
     // Initialize truck marker from initial snapshot (e.g. for completed routes)
-    if (existingRoute.snapshot && !liveSnapshot) {
-      setLiveSnapshot(existingRoute.snapshot as any);
+    if ((existingRoute as any).snapshot && !liveSnapshot) {
+      setLiveSnapshot((existingRoute as any).snapshot as any);
     }
   }, [existingRoute, liveSnapshot]);
 
@@ -833,8 +835,14 @@ export default function RouteBuilder() {
         initializedRouteIdRef.current = null;
         toast({ title: "Route Activated!", description: "Your route is ready. Press Start to begin tracking." });
         localStorage.removeItem('tracktruck_route_draft');
-        // Redirect to the route's edit page so the Start button and controls become visible
-        setLocation(`/admin/routes/${savedRoute.id}/edit`);
+        
+        if (routeId === savedRoute.id) {
+          // We're already on the edit page, wouter setLocation won't do anything so force refetch
+          await refetchRoute();
+        } else {
+          // We were on the /new page, redirecting to the edit page will trigger initial fetch
+          setLocation(`/admin/routes/${savedRoute.id}/edit`);
+        }
       } else if (noRedirect) {
         toast({ title: "Route Updated", description: "The live route has been changed and the shared map is updating." });
       } else if (isActivatedRoute) {
@@ -1475,15 +1483,18 @@ export default function RouteBuilder() {
                           onChangeDuration={(id, val) => {
                             setStops(s => s.map(x => {
                               if (x.id !== id) return x;
-                              if (isLiveRoute && x.dbId && routeId) {
-                                fetch(`/api/routes/${routeId}/stops/${x.dbId}`, {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
-                                  body: JSON.stringify({ durationMinutes: val }),
-                                }).catch(() => { });
-                              }
                               return { ...x, durationMinutes: val };
                             }));
+                          }}
+                          onBlurDuration={(id, val) => {
+                            const x = stops.find(s => s.id === id);
+                            if (x && isLiveRoute && x.dbId && routeId) {
+                              fetch(`/api/routes/${routeId}/stops/${x.dbId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+                                body: JSON.stringify({ durationMinutes: val }),
+                              }).catch(() => { });
+                            }
                           }}
                         />
                       ))}

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, ilike, desc, asc, isNull, sql, count } from "drizzle-orm";
 import { db, routesTable, routeStopsTable, shareLinksTable, simulationStatesTable } from "@workspace/db";
 import { positionAlongPolyline } from "../lib/geo";
+import { invalidateRouteCache } from "../lib/simulation-engine";
 import { broadcastToToken, broadcastToRoute } from "./ws";
 import {
   ListRoutesQueryParams,
@@ -59,13 +60,13 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
   const [shareLinks] =
     routeIds.length > 0
       ? await Promise.all([
-          db.select().from(shareLinksTable).where(
-            and(
-              sql`${shareLinksTable.routeId} = ANY(${sql`ARRAY[${sql.join(routeIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})`,
-              eq(shareLinksTable.active, true),
-            ),
+        db.select().from(shareLinksTable).where(
+          and(
+            sql`${shareLinksTable.routeId} = ANY(${sql`ARRAY[${sql.join(routeIds.map((id) => sql`${id}`), sql`, `)}]::int[]`})`,
+            eq(shareLinksTable.active, true),
           ),
-        ])
+        ),
+      ])
       : [[]];
 
   const shareMap = new Map(shareLinks.map((sl) => [sl.routeId, sl]));
@@ -256,9 +257,9 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
   // Single update limit for clients on STARTED routes (in_progress or paused)
   const isStarted = ["in_progress", "paused"].includes(existing.status);
   if (isStarted && authReq.user?.role === "user" && (existing.updateCount || 0) >= 1) {
-    res.status(403).json({ 
-      error: "forbidden", 
-      message: "This route has already been modified once while in progress. Further changes are restricted. Please contact an administrator." 
+    res.status(403).json({
+      error: "forbidden",
+      message: "This route has already been modified once while in progress. Further changes are restricted. Please contact an administrator."
     });
     return;
   }
@@ -298,39 +299,41 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     estimatedDurationS = dur;
   }
 
-    const hasPointChanges = 
-      (startLat !== undefined && startLat !== existing.startLat) ||
-      (startLng !== undefined && startLng !== existing.startLng) ||
-      (endLat !== undefined && endLat !== existing.endLat) ||
-      (endLng !== undefined && endLng !== existing.endLng);
-    
-    // Stringify polyline for deep comparison check if provided
-    const polylineChanged = polyline !== undefined && JSON.stringify(polyline) !== JSON.stringify(existing.polyline);
-    const nameChanged = name !== undefined && name !== existing.name;
-    const speedChanged = truckSpeedMph !== undefined && truckSpeedMph !== existing.truckSpeedMph;
-    const durationChanged = customDurationS !== undefined && customDurationS !== existing.customDurationS;
+  const hasPointChanges =
+    (startLat !== undefined && startLat !== existing.startLat) ||
+    (startLng !== undefined && startLng !== existing.startLng) ||
+    (endLat !== undefined && endLat !== existing.endLat) ||
+    (endLng !== undefined && endLng !== existing.endLng);
 
-    const anythingChanged = hasPointChanges || polylineChanged || nameChanged || speedChanged || durationChanged;
+  // Stringify polyline for deep comparison check if provided
+  const polylineChanged = polyline !== undefined && JSON.stringify(polyline) !== JSON.stringify(existing.polyline);
+  const nameChanged = name !== undefined && name !== existing.name;
+  const speedChanged = truckSpeedMph !== undefined && truckSpeedMph !== existing.truckSpeedMph;
+  const durationChanged = customDurationS !== undefined && customDurationS !== existing.customDurationS;
 
-    const [updated] = await db
-      .update(routesTable)
-      .set({
-        ...(name !== undefined && { name }),
-        ...(startLat !== undefined && { startLat }),
-        ...(startLng !== undefined && { startLng }),
-        ...(endLat !== undefined && { endLat }),
-        ...(endLng !== undefined && { endLng }),
-        ...(truckSpeedMph !== undefined && { truckSpeedMph }),
-        ...(polyline !== undefined && { polyline }),
-        ...(speedProfile !== undefined && { speedProfile }),
-        ...(customDurationS !== undefined && { customDurationS: customDurationS ?? null }),
-        distanceM,
-        estimatedDurationS,
-        updatedAt: new Date(),
-        ...(isStarted && anythingChanged && { updateCount: (existing.updateCount || 0) + 1 }),
-      })
-      .where(eq(routesTable.id, id))
-      .returning();
+  const anythingChanged = hasPointChanges || polylineChanged || nameChanged || speedChanged || durationChanged;
+
+  const [updated] = await db
+    .update(routesTable)
+    .set({
+      ...(name !== undefined && { name }),
+      ...(startLat !== undefined && { startLat }),
+      ...(startLng !== undefined && { startLng }),
+      ...(endLat !== undefined && { endLat }),
+      ...(endLng !== undefined && { endLng }),
+      ...(truckSpeedMph !== undefined && { truckSpeedMph }),
+      ...(polyline !== undefined && { polyline }),
+      ...(speedProfile !== undefined && { speedProfile }),
+      ...(customDurationS !== undefined && { customDurationS: customDurationS ?? null }),
+      distanceM,
+      estimatedDurationS,
+      updatedAt: new Date(),
+      ...(isStarted && anythingChanged && { updateCount: (existing.updateCount || 0) + 1 }),
+    })
+    .where(eq(routesTable.id, id))
+    .returning();
+
+  invalidateRouteCache(updated.id);
 
   // If route is activated, check if the route geometry changed and reset simulation
   if (["ready", "in_progress", "paused"].includes(updated.status)) {
@@ -412,9 +415,11 @@ router.delete("/routes/:id", validate({ params: DeleteRouteParams }), async (req
   }
 
   await db.update(routesTable).set({ deletedAt: new Date() }).where(eq(routesTable.id, id));
-  
+
   // Deactivate all share links immediately so public map stops working
   await db.update(shareLinksTable).set({ active: false }).where(eq(shareLinksTable.routeId, id));
+
+  invalidateRouteCache(id);
 
   res.status(204).send();
 });
@@ -479,6 +484,8 @@ router.patch("/routes/:id/speed", async (req, res) => {
     })
     .where(eq(routesTable.id, id))
     .returning();
+
+  invalidateRouteCache(updated.id);
 
   // When speed/duration settings change on a LIVE route: recalculate
   // effectiveElapsedMs so the truck stays at its current position instead of
@@ -585,6 +592,8 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
     .values({ routeId, name, lat, lng, durationMinutes, sortOrder })
     .returning();
 
+  invalidateRouteCache(routeId);
+
   // Notify live viewers so position recalculates with the new stop
   if (["in_progress", "paused"].includes(route.status)) {
     const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
@@ -660,6 +669,8 @@ router.put(
       return;
     }
 
+    invalidateRouteCache(routeId);
+
     // Notify live viewers so position recalculates with new stop settings
     if (["in_progress", "paused"].includes(route.status)) {
       const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
@@ -709,6 +720,8 @@ router.delete("/routes/:id/stops/:stopId", validate({ params: DeleteStopParams }
 
 
   await db.delete(routeStopsTable).where(and(eq(routeStopsTable.id, stopId), eq(routeStopsTable.routeId, routeId)));
+
+  invalidateRouteCache(routeId);
 
   // Notify live viewers so the truck starts moving immediately
   if (["in_progress", "paused"].includes(route.status)) {

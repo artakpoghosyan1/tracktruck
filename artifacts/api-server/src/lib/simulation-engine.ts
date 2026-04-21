@@ -1,4 +1,4 @@
-import { eq, and, asc, inArray } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
 import { positionAlongPolyline, haversineM } from "./geo";
 import { broadcastToToken, broadcastToRoute } from "../routes/ws";
@@ -369,58 +369,94 @@ const lastStopExitSMap = new Map<number, number>();
 
 let tickCount = 0;
 
+interface CachedRoute {
+  speedProfile: SpeedSegment[];
+  sortedStops: StopEntry[];
+  shareTokens: string[];
+  polyline: number[][];
+}
+
+const routeCache = new Map<number, CachedRoute>();
+
+export function invalidateRouteCache(routeId: number) {
+  routeCache.delete(routeId);
+}
+
 async function tick() {
   tickCount++;
 
   const activeRoutes = await db
-    .select({ route: routesTable, simState: simulationStatesTable })
+    .select({
+      route: {
+        id: routesTable.id,
+        status: routesTable.status,
+        truckSpeedMph: routesTable.truckSpeedMph,
+        customDurationS: routesTable.customDurationS,
+        customDurationEnabled: routesTable.customDurationEnabled,
+        estimatedDurationS: routesTable.estimatedDurationS,
+        distanceM: routesTable.distanceM,
+      },
+      simState: simulationStatesTable
+    })
     .from(routesTable)
     .innerJoin(simulationStatesTable, eq(simulationStatesTable.routeId, routesTable.id))
-    .where(inArray(routesTable.status, ["in_progress", "paused"]));
+    .where(eq(routesTable.status, "in_progress"));
 
   for (const { route, simState } of activeRoutes) {
-    // Route must have been started at least once
-    if (!simState.startedAt && !simState.pausedAt) continue;
+    if (!simState.startedAt) continue;
 
     const nowMs = Date.now();
     const wallElapsedMs = simState.startedAt ? nowMs - simState.startedAt.getTime() : 0;
     const totalElapsedMs = simState.effectiveElapsedMs + wallElapsedMs;
     const totalElapsedS = totalElapsedMs / 1000;
 
-    const rawSpeedProfile = (route.speedProfile as SpeedSegment[] | null) || [];
-    const polyline = (route.polyline as number[][]) || [];
+    let cache = routeCache.get(route.id);
 
-    // Scale the OSRM/Mapbox speed profile so that its distance-weighted
-    // average matches truckSpeedMph.  Raw profiles contain realistic traffic
-    // speeds (often 20-40 mph in cities), which made the truck crawl.
-    const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedMph);
+    if (!cache) {
+      const [fullRoute] = await db
+        .select({ polyline: routesTable.polyline, speedProfile: routesTable.speedProfile })
+        .from(routesTable)
+        .where(eq(routesTable.id, route.id))
+        .limit(1);
 
-    // Load stops for this route
-    const dbStops = await db
-      .select()
-      .from(routeStopsTable)
-      .where(eq(routeStopsTable.routeId, route.id))
-      .orderBy(asc(routeStopsTable.sortOrder));
+      const polyline = (fullRoute?.polyline as number[][]) || [];
+      const rawSpeedProfile = (fullRoute?.speedProfile as SpeedSegment[] | null) || [];
+      const speedProfile = scaleSpeedProfile(rawSpeedProfile, route.truckSpeedMph);
 
-    // Project real (DB) stops onto the polyline
-    const realStops: StopEntry[] = dbStops.map((s) => ({
-      distanceAlongPolylineM: distanceAlongPolylineToNearestVertex(polyline, s.lat, s.lng),
-      durationS: s.durationMinutes * 60,
-      name: s.name,
-    }));
+      const dbStops = await db
+        .select()
+        .from(routeStopsTable)
+        .where(eq(routeStopsTable.routeId, route.id))
+        .orderBy(asc(routeStopsTable.sortOrder));
 
-    // Inject deterministic traffic-light stops at sharp turns on urban roads.
-    // Only inject stops AHEAD of the truck's last known position so that
-    // enabling this for an already-running route doesn't cause a backwards jump.
-    const traveledM = simState.distanceTraveledM ?? 0;
-    const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedMph, traveledM);
+      const realStops: StopEntry[] = dbStops.map((s) => ({
+        distanceAlongPolylineM: distanceAlongPolylineToNearestVertex(polyline, s.lat, s.lng),
+        durationS: s.durationMinutes * 60,
+        name: s.name,
+      }));
 
-    // Merge and sort all stops by distance
-    const sortedStops: StopEntry[] = [...realStops, ...trafficStops]
-      .sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
+      const trafficStops = buildIntersectionStops(polyline, speedProfile, route.truckSpeedMph, 0);
 
-    // Speed multiplier: only scales driving time, not stop waits.
-    // Total real duration = customDurationS (driving) + sum(stop durations)
+      const sortedStops: StopEntry[] = [...realStops, ...trafficStops]
+        .sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
+
+      const shareLinks = await db
+        .select()
+        .from(shareLinksTable)
+        .where(and(eq(shareLinksTable.routeId, route.id), eq(shareLinksTable.active, true)));
+
+      cache = {
+        speedProfile,
+        sortedStops,
+        shareTokens: shareLinks.map(sl => sl.token),
+        polyline,
+      };
+
+      routeCache.set(route.id, cache);
+    }
+
+    const polyline = cache.polyline;
+
     const speedMultiplier = (route.customDurationEnabled && route.customDurationS && route.customDurationS > 0)
       ? (route.estimatedDurationS / route.customDurationS)
       : 1.0;
@@ -428,33 +464,18 @@ async function tick() {
     const pos = computePositionWithStops(
       totalElapsedS,
       polyline,
-      sortedStops,
-      speedProfile,
+      cache.sortedStops,
+      cache.speedProfile,
       route.truckSpeedMph,
       speedMultiplier,
     );
 
-
-
-
-    // -----------------------------------------------------------------------
-    // Stop / traffic-light detection
-    // -----------------------------------------------------------------------
-
-    // pos.atStopName: undefined = traveling, '' = virtual (traffic light), 'name' = real stop
     const isAtAnyStop = pos.atStopName != null;
-
-    // Track transitions in/out of stops for per-stop ramp-up
     const wasAtStop = wasAtStopMap.get(route.id) ?? false;
     if (!isAtAnyStop && wasAtStop) {
-      // Just left a stop — record the time so we can ramp speed back up
       lastStopExitSMap.set(route.id, totalElapsedS);
     }
     wasAtStopMap.set(route.id, isAtAnyStop);
-
-    // -----------------------------------------------------------------------
-    // Completion grace period
-    // -----------------------------------------------------------------------
 
     if (pos.completed) {
       if (!completionGraceMap.has(route.id)) completionGraceMap.set(route.id, Date.now());
@@ -467,20 +488,15 @@ async function tick() {
     const inGracePeriod = pos.completed && graceElapsedS < COMPLETION_GRACE_S;
     const trulyCompleted = pos.completed && graceElapsedS >= COMPLETION_GRACE_S;
 
-    // -----------------------------------------------------------------------
-    // Speed calculation
-    // -----------------------------------------------------------------------
-
     const RAMP_UP_S = 8;
-    const baseSpeedMph = speedAtDistanceM(speedProfile, pos.distanceTraveledM, route.truckSpeedMph);
+    const baseSpeedMph = speedAtDistanceM(cache.speedProfile, pos.distanceTraveledM, route.truckSpeedMph);
 
-    // --- Braking factor: decelerate when within 220 m of any upcoming stop or route end ---
     const routeTotalDistM = route.distanceM > 0
       ? route.distanceM
       : polyline.reduce((acc: number, _pt: number[], i: number) =>
         i === 0 ? 0 : acc + haversineM(polyline[i - 1][1], polyline[i - 1][0], polyline[i][1], polyline[i][0]), 0);
 
-    const nextStopAhead = sortedStops.find(s => s.distanceAlongPolylineM > pos.distanceTraveledM + 1);
+    const nextStopAhead = cache.sortedStops.find(s => s.distanceAlongPolylineM > pos.distanceTraveledM + 1);
     const distToNextStopM = nextStopAhead
       ? nextStopAhead.distanceAlongPolylineM - pos.distanceTraveledM
       : Infinity;
@@ -489,47 +505,38 @@ async function tick() {
 
     const BRAKING_ZONE_M = 220;
     const drivingBrakeFactor = inGracePeriod
-      ? 0  // grace period: let graceBrakeFactor fully control speed decay to 0
+      ? 0
       : closestEventM < BRAKING_ZONE_M
         ? Math.max(0.05, closestEventM / BRAKING_ZONE_M)
         : 1.0;
 
-    // Grace period: speed decays smoothly from road speed → 0 over COMPLETION_GRACE_S seconds
     const graceBrakeFactor = inGracePeriod
       ? Math.max(0, 1 - graceElapsedS / COMPLETION_GRACE_S)
       : 1.0;
 
     const combinedBrakeFactor = drivingBrakeFactor * graceBrakeFactor;
 
-    // --- Natural fluctuation: ±8% of road speed (multiplicative, never exceeds road limit) ---
     const fluctMult = 1.0
       + Math.sin(totalElapsedS / 22) * 0.08
       + Math.sin(totalElapsedS / 7) * 0.04
       + Math.sin(totalElapsedS / 3) * 0.02;
 
-    // --- Ramp-up after ANY stop (traffic light or real stop) ---
     const lastStopExitS = lastStopExitSMap.get(route.id) ?? -Infinity;
     const timeSinceStopExitS = isAtAnyStop ? 0 : totalElapsedS - lastStopExitS;
     const stopRampFactor = timeSinceStopExitS < RAMP_UP_S ? timeSinceStopExitS / RAMP_UP_S : 1.0;
 
-    // --- Ramp-up after admin pause/resume (wallElapsedMs resets on each resume) ---
     const wallElapsedS = wallElapsedMs / 1000;
     const adminRampFactor = Math.min(1.0, wallElapsedS / RAMP_UP_S);
 
-    // Combined ramp: both stop-ramp and admin-ramp must complete for full speed
     const rampFactor = isAtAnyStop ? 0 : Math.min(stopRampFactor, adminRampFactor);
 
     const MAX_ALLOWED_SPEED_MPH = 75;
     const targetSpeedMph = isAtAnyStop
       ? 0
       : Math.min(MAX_ALLOWED_SPEED_MPH, Math.max(0, baseSpeedMph * fluctMult * combinedBrakeFactor));
-    const currentSpeedMph = route.customDurationS 
-      ? Math.round(targetSpeedMph * rampFactor * speedMultiplier) 
+    const currentSpeedMph = route.customDurationS
+      ? Math.round(targetSpeedMph * rampFactor * speedMultiplier)
       : Math.round(targetSpeedMph * rampFactor);
-
-    // -----------------------------------------------------------------------
-    // Display position (edge-offset for real named stops only)
-    // -----------------------------------------------------------------------
 
     let displayLat = pos.lat;
     let displayLng = pos.lng;
@@ -539,18 +546,12 @@ async function tick() {
       displayLng = edgeOffset.lng;
     }
 
-    // Virtual stops (traffic lights) have empty names — don't expose them to the UI
-    const visibleStopName = pos.atStopName || null; // '' → null so UI shows nothing
-
-    // -----------------------------------------------------------------------
-    // Build and broadcast snapshot
-    // -----------------------------------------------------------------------
+    const visibleStopName = pos.atStopName || null;
 
     const snapshot = {
       type: "snapshot",
       routeId: route.id,
       timestamp: new Date().toISOString(),
-      // During grace period: keep broadcasting as "in_progress" so UI stays open
       status: trulyCompleted
         ? "completed"
         : route.status === "paused"
@@ -567,25 +568,16 @@ async function tick() {
       speedMph: currentSpeedMph,
     };
 
-    const shareLinks = await db
-      .select()
-      .from(shareLinksTable)
-      .where(and(eq(shareLinksTable.routeId, route.id), eq(shareLinksTable.active, true)));
-
-    for (const sl of shareLinks) {
-      broadcastToToken(sl.token, snapshot);
+    for (const token of cache.shareTokens) {
+      broadcastToToken(token, snapshot);
     }
     broadcastToRoute(route.id, snapshot);
 
-    // -----------------------------------------------------------------------
-    // Completion handling
-    // -----------------------------------------------------------------------
-
     if (trulyCompleted) {
-      // Clean up module-level maps
       completionGraceMap.delete(route.id);
       wasAtStopMap.delete(route.id);
       lastStopExitSMap.delete(route.id);
+      invalidateRouteCache(route.id);
 
       await db
         .update(routesTable)
@@ -607,7 +599,6 @@ async function tick() {
       continue;
     }
 
-    // Periodic DB save (non-completion tick)
     if (tickCount % DB_SAVE_INTERVAL_TICKS === 0) {
       await db
         .update(simulationStatesTable)
@@ -627,3 +618,4 @@ export function startSimulationEngine() {
     tick().catch((err) => console.error("Simulation tick error:", err));
   }, TICK_INTERVAL_MS);
 }
+
