@@ -335,16 +335,15 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
 
   invalidateRouteCache(updated.id);
 
-  // If route is activated, check if the route geometry changed and reset simulation
+  // If route is activated, check if the start/end map points explicitly changed to reset the simulation completely
   if (["ready", "in_progress", "paused"].includes(updated.status)) {
-    const routeGeometryChanged =
+    const startEndGeometryChanged =
       (startLat !== undefined && startLat !== existing.startLat) ||
       (startLng !== undefined && startLng !== existing.startLng) ||
       (endLat !== undefined && endLat !== existing.endLat) ||
-      (endLng !== undefined && endLng !== existing.endLng) ||
-      polyline !== undefined;
+      (endLng !== undefined && endLng !== existing.endLng);
 
-    if (routeGeometryChanged) {
+    if (startEndGeometryChanged) {
       // Reset simulation state so the truck starts from the new start point
       await db.update(simulationStatesTable)
         .set({
@@ -617,6 +616,66 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
     sortOrder: stop.sortOrder,
     createdAt: stop.createdAt.toISOString(),
   });
+});
+
+// Bulk replace all stops
+router.put("/routes/:id/stops/bulk", async (req, res) => {
+  const authReq = req as AuthRequest;
+  const routeId = parseInt(req.params["id"] as string);
+
+  const [route] = await db
+    .select()
+    .from(routesTable)
+    .where(and(eq(routesTable.id, routeId), eq(routesTable.userId, authReq.userId), isNull(routesTable.deletedAt)))
+    .limit(1);
+
+  if (!route) {
+    res.status(404).json({ error: "not_found", message: "Route not found" });
+    return;
+  }
+
+  if (route.status === "completed") {
+    res.status(400).json({ error: "bad_request", message: "Route is completed and stops cannot be modified." });
+    return;
+  }
+
+  const { stops } = req.body as {
+    stops: { name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number }[];
+  };
+
+  await db.transaction(async (tx) => {
+    // Delete all existing stops
+    await tx.delete(routeStopsTable).where(eq(routeStopsTable.routeId, routeId));
+
+    // Insert new ones
+    if (stops && stops.length > 0) {
+      const values = stops.map((s, i) => ({
+        routeId,
+        name: s.name,
+        lat: s.lat,
+        lng: s.lng,
+        durationMinutes: s.durationMinutes || 5,
+        sortOrder: s.sortOrder ?? i,
+      }));
+      await tx.insert(routeStopsTable).values(values);
+    }
+  });
+
+  invalidateRouteCache(routeId);
+
+  if (["in_progress", "paused"].includes(route.status)) {
+    const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
+    broadcastToRoute(route.id, routeUpdatedMsg);
+    const activeLinks = await db
+      .select()
+      .from(shareLinksTable)
+      .where(and(eq(shareLinksTable.routeId, route.id), eq(shareLinksTable.active, true)));
+    for (const sl of activeLinks) {
+      broadcastToToken(sl.token, routeUpdatedMsg);
+    }
+  }
+
+  res.status(200).json({ success: true });
 });
 
 router.put(

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Link, useLocation, useParams } from "wouter";
+import { useQueryClient } from '@tanstack/react-query';
 import Map, { Marker, Source, Layer, MapRef, Popup } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -213,6 +214,7 @@ function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuratio
 }
 
 export default function RouteBuilder() {
+  const queryClient = useQueryClient();
   const params = useParams();
   const routeId = params.id ? parseInt(params.id) : undefined;
   const [, setLocation] = useLocation();
@@ -497,7 +499,6 @@ export default function RouteBuilder() {
               atStopName: data.atStopName || null,
             }));
           } else if (data.type === "route_updated") {
-            initializedRouteIdRef.current = null;
             refetchRoute();
           }
         } catch { }
@@ -517,73 +518,32 @@ export default function RouteBuilder() {
     };
   }, [routeId, existingRoute?.status, existingRoute?.shareToken]);
 
-  // --- Auto-save to DB (debounced) ---
-  useEffect(() => {
-    // Check if anything has actually changed from the last known state
-    // For existing routes, we compare with existingRoute.
-    // For new routes, we check if start/end/stops or name is populated.
-    let isDirty = false;
-    if (routeId && existingRoute) {
-      if (!['draft', 'ready'].includes(existingRoute.status)) return;
-      isDirty = 
-        name !== existingRoute.name || 
-        start?.lat !== existingRoute.startLat || 
-        start?.lng !== existingRoute.startLng ||
-        end?.lat !== existingRoute.endLat ||
-        end?.lng !== existingRoute.endLng ||
-        stops.length !== existingRoute.stops.length;
-    } else if (!routeId) {
-      // For a brand new route, we are dirty if the user set a location or a name
-      isDirty = (!!name && name.trim().length > 0) || !!start || !!end || stops.length > 0;
-    }
-
-    if (!isDirty) return;
-
-    const timer = setTimeout(async () => {
-      try {
-        const placeholderName = `UNFINISHED ROUTE`;
-        const payload = {
-          name: name.trim() || placeholderName,
-          startLat: start?.lat ?? 0,
-          startLng: start?.lng ?? 0,
-          endLat: end?.lat ?? 0,
-          endLng: end?.lng ?? 0,
-          truckSpeedMph: 60,
-          polyline,
-          speedProfile,
-        };
-
-        if (routeId) {
-          await updateMut.mutateAsync({ id: routeId, data: payload });
-        } else {
-          // IMPORTANT: Create the route in the DB and redirect to its new edit URL
-          const resp = await createMut.mutateAsync({ data: payload });
-          // Use replace: true so the "Back" button goes to Dashboard, not the empty /new page
-          setLocation(`/admin/routes/${resp.id}/edit`, { replace: true });
-        }
-      } catch (err) {
-        console.error("Auto-save failed", err);
-      }
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [name, start, end, stops, polyline, speedProfile, routeId, existingRoute, updateMut, createMut, setLocation]);
+  // Removed Auto-Save completely per user request. 
+  // We will now explicitly save when "Done Adding Stops" completes its Polyline recalculation!
+  const shouldSaveAfterRecalc = useRef(false);
 
   // Use a generation counter to discard stale async routing responses
   const routingGen = useRef(0);
 
-  // Fetch route alternatives whenever start/end changes — stops do NOT affect the route calculation
+  // Fetch route alternatives whenever start/end, stops, or mode changes
   useEffect(() => {
-    if (!start || !end) {
-      setRouteOptions([]);
-      setRoutingError(null);
-      return;
+    if (!start || !end || showAddStop) {
+      if (!start || !end) {
+        setRouteOptions([]);
+        setRoutingError(null);
+      }
+      return; // Do NOT recalculate while the user is actively adding/editing stops
     }
     const gen = ++routingGen.current;
     const t = setTimeout(async () => {
       setIsRouting(true);
       setRoutingError(null);
-      const coords = [[start.lng, start.lat], [end.lng, end.lat]];
+      // Construct exact path: Start -> ...Stops -> End
+      const coords = [
+        [start.lng, start.lat],
+        ...stops.map(s => [s.lng, s.lat]),
+        [end.lng, end.lat]
+      ];
 
       try {
         let options: RouteOption[] = [];
@@ -613,6 +573,11 @@ export default function RouteBuilder() {
           // Only auto-select the first option for completely new routes.
           // For existing routes, we want to maintain the selection provided by the init effect.
           if (!routeId) setSelectedIdx(0);
+          
+          if (shouldSaveAfterRecalc.current) {
+            shouldSaveAfterRecalc.current = false;
+            setTimeout(() => handleSave(false, true), 100);
+          }
 
           // Fit map to the first (shortest) route
           if (mapRef.current && mapboxToken) {
@@ -636,7 +601,7 @@ export default function RouteBuilder() {
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [start, end, mapboxToken]);
+  }, [start, end, stops, showAddStop, mapboxToken]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -658,17 +623,9 @@ export default function RouteBuilder() {
     const tempId = `client-${Date.now()}`;
     setStops(prev => {
       const newStop: Stop = { id: tempId, name: result.placeName, lat: result.lat, lng: result.lng, durationMinutes: 15 };
-      if (isLiveRouteRef.current) {
-        const sortOrder = prev.length;
-        saveStopToDb(newStop, sortOrder).then(dbId => {
-          if (dbId != null) {
-            setStops(s => s.map(x => x.id === tempId ? { ...x, id: `db-${dbId}`, dbId } : x));
-          }
-        });
-      }
       return [...prev, newStop];
     });
-    setShowAddStop(false);
+    // Do NOT set showAddStop(false) here so they can keep clicking/adding
   };
 
   const showAddStopRef = useRef(showAddStop);
@@ -726,39 +683,14 @@ export default function RouteBuilder() {
       const tempId = `client-${Date.now()}`;
       const placeholder = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 
-      // Optimistically add to state
+      // Save local state immediately
       setStops(prev => {
         const newStop: Stop = { id: tempId, name: placeholder, lat, lng, durationMinutes: 15 };
         return [...prev, newStop];
       });
 
-      // Save to DB immediately when live, then reverse-geocode and update the name
-      // stopsRef.current already has the new stop appended above (React batches updates,
-      // but we read the PRE-append length here so sortOrder = prev.length)
-      const sortOrder = stopsRef.current.length; // will be 1 ahead after setStops runs, fine as sortOrder
-      const dbIdPromise: Promise<number | null> = isLiveRouteRef.current
-        ? saveStopToDb({ name: placeholder, lat, lng, durationMinutes: 15 }, sortOrder)
-        : Promise.resolve(null);
-
-      dbIdPromise.then(dbId => {
-        if (dbId != null) {
-          setStops(s => s.map(x => x.id === tempId ? { ...x, id: `db-${dbId}`, dbId } : x));
-        }
-      });
-
       reverseGeocode(lat, lng, mapboxToken).then(async label => {
-        // Update name in state (match by tempId or by the db-prefixed id)
         setStops(s => s.map(x => (x.id === tempId || x.lat === lat && x.lng === lng && x.name === placeholder) ? { ...x, name: label } : x));
-        // Also update name in DB if we have the dbId
-        const dbId = await dbIdPromise;
-        if (dbId != null && routeIdRef.current) {
-          setStops(s => s.map(x => x.id === `db-${dbId}` ? { ...x, name: label } : x));
-          fetch(`/api/routes/${routeIdRef.current}/stops/${dbId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
-            body: JSON.stringify({ name: label }),
-          }).catch(() => { });
-        }
       });
       return;
     }
@@ -813,20 +745,23 @@ export default function RouteBuilder() {
         savedRoute = await updateMut.mutateAsync({ id: routeId, data: payload });
       } else {
         savedRoute = await createMut.mutateAsync({ data: payload });
-        for (let i = 0; i < stops.length; i++) {
-          await fetch(`/api/routes/${savedRoute.id}/stops`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
-            },
-            body: JSON.stringify({
-              name: stops[i].name, lat: stops[i].lat, lng: stops[i].lng,
-              durationMinutes: stops[i].durationMinutes, sortOrder: i,
-            }),
-          });
-        }
       }
+      
+      // Always sync stops to the backend cleanly!
+      const bulkRes = await fetch(`/api/routes/${savedRoute.id}/stops/bulk`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+        body: JSON.stringify({
+          stops: stops.map((s, i) => ({ name: s.name, lat: s.lat, lng: s.lng, durationMinutes: s.durationMinutes, sortOrder: i }))
+        })
+      });
+      if (!bulkRes.ok) {
+        const bd = await bulkRes.json().catch(()=>({}));
+        throw new Error("Failed to save stops: " + (bd.message || bulkRes.statusText));
+      }
+      
+      // Force React Query to wipe its cache so that refetchRoute pulls the newly inserted stops!
+      queryClient.invalidateQueries({ queryKey: [`/api/routes/${savedRoute.id}`] });
 
       if (isActivate) {
         await activateMut.mutateAsync({ id: savedRoute.id });
@@ -1438,7 +1373,16 @@ export default function RouteBuilder() {
               </div>
 
               <button
-                onClick={() => { setShowAddStop(!showAddStop); setMapClick(null); }}
+                onClick={() => { 
+                  if (showAddStop) {
+                    shouldSaveAfterRecalc.current = true;
+                    setShowAddStop(false);
+                    setMapClick(null);
+                  } else {
+                    setShowAddStop(true);
+                    setMapClick(null);
+                  }
+                }}
                 className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddStop
                   ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
                   : 'bg-primary text-white hover:bg-primary/90 shadow-primary/20'
@@ -1473,7 +1417,7 @@ export default function RouteBuilder() {
                           onRemove={(id) => {
                             setStops(s => {
                               const removing = s.find(x => x.id === id);
-                              if (isLiveRoute && removing?.dbId) {
+                              if (routeId && removing?.dbId) {
                                 deleteStopFromDb(removing.dbId);
                               }
                               return s.filter(x => x.id !== id);
@@ -1488,7 +1432,7 @@ export default function RouteBuilder() {
                           }}
                           onBlurDuration={(id, val) => {
                             const x = stops.find(s => s.id === id);
-                            if (x && isLiveRoute && x.dbId && routeId) {
+                            if (x && routeId && x.dbId) {
                               fetch(`/api/routes/${routeId}/stops/${x.dbId}`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },

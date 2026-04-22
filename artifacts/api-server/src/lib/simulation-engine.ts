@@ -261,6 +261,8 @@ function destinationPoint(lat: number, lng: number, bearingDeg: number, distance
 // ---------------------------------------------------------------------------
 
 /**
+ * Find the cumulative distance along the polyline by projecting the target
+/**
  * Find the cumulative distance along the polyline to the vertex that is
  * closest to (targetLat, targetLng).  We use this to map a stop's geographic
  * coordinate to a "distance from start" value.
@@ -317,8 +319,7 @@ function computePositionWithStops(
   let travelDistConsumedM = 0;
 
   for (const stop of sortedStops) {
-    const legDistM = stop.distanceAlongPolylineM - travelDistConsumedM;
-    if (legDistM <= 0) continue;
+    const legDistM = Math.max(0, stop.distanceAlongPolylineM - travelDistConsumedM);
 
     // Time to drive this leg at natural speed
     const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
@@ -339,6 +340,7 @@ function computePositionWithStops(
 
     // Stops ALWAYS take their full duration (not affected by multiplier)
     if (remainingS < stop.durationS) {
+      console.log(`[SIM] Halting at stop "${stop.name}" at distance ${stop.distanceAlongPolylineM}. remainingS=${remainingS}, durationS=${stop.durationS}`);
       const pos = positionAlongPolyline(polyline, stop.distanceAlongPolylineM);
       return { ...pos, atStopName: stop.name };
     }
