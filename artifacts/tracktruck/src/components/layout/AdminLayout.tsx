@@ -1,4 +1,5 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
+import { Menu, X } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Map, LayoutDashboard, Truck, LogOut, Loader2, ShieldCheck } from "lucide-react";
 import { useAuthMe, getAuthMeQueryKey } from "@workspace/api-client-react";
@@ -12,6 +13,7 @@ interface AdminLayoutProps {
 export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) {
   const [location, setLocation] = useLocation();
   const { setAuthenticated } = useAppStore();
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   
   const { data: user, isLoading, isError } = useAuthMe({
     query: {
@@ -60,9 +62,28 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
 
   return (
     <div className="h-screen overflow-hidden bg-background flex flex-col md:flex-row">
+      {/* Mobile Header */}
+      <div className="md:hidden flex items-center justify-between p-4 bg-card border-b border-border/60 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-primary to-blue-400 flex items-center justify-center shadow-sm">
+            <Truck className="w-5 h-5 text-white" />
+          </div>
+          <span className="font-display font-bold text-lg leading-none">TrackTruck</span>
+        </div>
+        <button 
+          onClick={() => setIsMobileOpen(!isMobileOpen)}
+          className="p-2 -mr-2 text-muted-foreground hover:bg-muted rounded-lg"
+        >
+          {isMobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
       {/* Sidebar */}
-      <aside className="w-full md:w-72 bg-card border-r border-border/60 flex flex-col shadow-sm z-10 shrink-0">
-        <div className="p-6 flex items-center gap-3 border-b border-border/50">
+      <aside className={`
+        ${isMobileOpen ? 'flex' : 'hidden'} 
+        md:flex w-full md:w-72 bg-card border-r border-border/60 flex-col shadow-sm z-20 shrink-0 absolute md:static inset-0 top-[73px] md:top-0
+      `}>
+        <div className="hidden md:flex p-6 items-center gap-3 border-b border-border/50">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-blue-400 flex items-center justify-center shadow-lg shadow-primary/20">
             <Truck className="w-6 h-6 text-white" />
           </div>
@@ -98,6 +119,7 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
                 <Link 
                   key={item.href} 
                   href={item.href}
+                  onClick={() => setIsMobileOpen(false)}
                   className={`
                     w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all duration-200
                     ${active 

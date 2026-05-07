@@ -7,7 +7,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, Zap, Flag, GripVertical,
   Plus, Trash2, MapPin, X, Loader2, Play, Pause,
-  Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon
+  Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon, Menu
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -231,6 +231,7 @@ export default function RouteBuilder() {
   const [speedSaving, setSpeedSaving] = useState(false);
   const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Live truck position for in-progress routes
   const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedMph: number; atStopName: string | null } | null>(null);
@@ -823,24 +824,25 @@ export default function RouteBuilder() {
       <MapboxPrompt />
 
       {/* Header */}
-      <header className="shrink-0 bg-card border-b border-border/60 px-6 py-3.5 flex items-center justify-between shadow-sm z-10">
-        <div className="flex items-center gap-3">
-          <Link href="/admin" className="p-2 -ml-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div>
-            <h1 className="text-base font-bold font-display leading-tight">{routeId ? "Edit Route" : "Create New Route"}</h1>
-            <p className="text-xs text-muted-foreground">Search locations or click the map · compare route options · save your choice</p>
+      <header className="shrink-0 bg-card border-b border-border/60 px-4 lg:px-6 py-3.5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 shadow-sm z-30 w-full">
+        <div className="flex items-center justify-between w-full lg:w-auto gap-3">
+          <div className="flex items-center gap-3">
+            <Link href="/admin" className="p-2 -ml-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div>
+              <h1 className="text-base font-bold font-display leading-tight">{routeId ? "Edit Route" : "Create New Route"}</h1>
+              <p className="text-xs text-muted-foreground hidden lg:block">Search locations or click the map · compare route options · save your choice</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={openMapboxPrompt}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-            title="Configure Mapbox Token"
+          <button 
+            className="lg:hidden p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           >
-            <Settings className="w-4 h-4" />
+            {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
 
           {/* Loading state indicator */}
           {routeId && !existingRoute && (
@@ -971,10 +973,10 @@ export default function RouteBuilder() {
       </header>
 
       {/* Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
 
         {/* Left Panel */}
-        <aside className="w-96 shrink-0 bg-background border-r border-border/60 flex flex-col overflow-y-auto">
+        <aside className={`${isSidebarOpen ? 'flex absolute inset-0 z-20' : 'hidden lg:flex'} w-full lg:w-96 shrink-0 bg-background border-r border-border/60 flex-col overflow-y-auto`}>
           <div className="p-5 space-y-5">
             {isCompleted && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">

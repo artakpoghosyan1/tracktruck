@@ -323,7 +323,7 @@ export default function PublicTracking() {
 
   // --- Full map view with Mapbox ---
   return (
-    <div className="h-screen w-full relative bg-slate-100 flex flex-col overflow-hidden">
+    <div className="h-[100dvh] w-full relative bg-slate-100 flex flex-col overflow-hidden">
       {/* Header overlay */}
       <header className="absolute top-0 inset-x-0 z-10 bg-gradient-to-b from-black/60 to-transparent pt-5 pb-14 px-5 flex justify-between items-start pointer-events-none">
         <div className="flex items-center gap-3">
@@ -384,8 +384,8 @@ export default function PublicTracking() {
       </div>
 
       {/* Bottom Panel */}
-      <div className="absolute bottom-5 inset-x-4 z-10 pointer-events-none">
-        <div className="max-w-2xl mx-auto bg-white/95 backdrop-blur-xl rounded-3xl px-5 py-4 shadow-2xl border border-white/50 pointer-events-auto space-y-3">
+      <div className="absolute bottom-8 sm:bottom-10 inset-x-4 z-30 pointer-events-none pb-safe">
+        <div className="max-w-2xl mx-auto bg-white/95 backdrop-blur-xl rounded-2xl sm:rounded-3xl px-4 sm:px-5 py-3 sm:py-4 shadow-2xl border border-white/50 pointer-events-auto space-y-3">
 
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
