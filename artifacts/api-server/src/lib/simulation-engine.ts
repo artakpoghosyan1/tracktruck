@@ -408,8 +408,8 @@ async function tick() {
     if (!simState.startedAt) continue;
 
     const nowMs = Date.now();
-    const wallElapsedMs = simState.startedAt ? nowMs - simState.startedAt.getTime() : 0;
-    const totalElapsedMs = simState.effectiveElapsedMs + wallElapsedMs;
+    const wallElapsedMs = Math.max(0, simState.startedAt ? nowMs - simState.startedAt.getTime() : 0);
+    const totalElapsedMs = Math.max(0, simState.effectiveElapsedMs + wallElapsedMs);
     const totalElapsedS = totalElapsedMs / 1000;
 
     let cache = routeCache.get(route.id);
@@ -536,9 +536,7 @@ async function tick() {
     const targetSpeedMph = isAtAnyStop
       ? 0
       : Math.min(MAX_ALLOWED_SPEED_MPH, Math.max(0, baseSpeedMph * fluctMult * combinedBrakeFactor));
-    const currentSpeedMph = route.customDurationS
-      ? Math.round(targetSpeedMph * rampFactor * speedMultiplier)
-      : Math.round(targetSpeedMph * rampFactor);
+    const currentSpeedMph = Math.max(0, Math.round(targetSpeedMph * rampFactor));
 
     let displayLat = pos.lat;
     let displayLng = pos.lng;
