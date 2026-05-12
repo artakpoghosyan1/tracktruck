@@ -13,6 +13,7 @@ import { validate } from "../middlewares/validate";
 import { requireAuth, type AuthRequest } from "../middlewares/auth";
 import { totalPolylineDistance } from "../lib/geo";
 import { invalidateRouteCache } from "../lib/simulation-engine";
+import { broadcastToToken, broadcastToRoute } from "./ws";
 
 const router: IRouter = Router();
 
@@ -185,6 +186,17 @@ router.post("/routes/:id/pause", validate({ params: PauseRouteParams }), async (
     .where(eq(simulationStatesTable.routeId, routeId));
 
   invalidateRouteCache(routeId);
+
+  // Push a speed=0 snapshot so public maps stop showing the last moving speed
+  const pauseSnapshot = { type: "snapshot", routeId, status: "paused", speedMph: 0 };
+  broadcastToRoute(routeId, pauseSnapshot);
+  const activeLinks = await db
+    .select({ token: shareLinksTable.token })
+    .from(shareLinksTable)
+    .where(and(eq(shareLinksTable.routeId, routeId), eq(shareLinksTable.active, true)));
+  for (const { token } of activeLinks) {
+    broadcastToToken(token, pauseSnapshot);
+  }
 
   res.json({ routeId, status: "paused", effectiveElapsedMs: totalElapsedMs });
 });

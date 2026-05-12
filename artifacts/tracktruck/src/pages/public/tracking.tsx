@@ -111,8 +111,11 @@ export default function PublicTracking() {
           if (data.type === 'route_updated') {
             // Admin saved an updated route — reload so map shows the new polyline
             refetchRef.current?.();
-          } else if (data.lat !== undefined || data.type === 'snapshot') {
+          } else if (data.lat !== undefined) {
             setSnapshot(data);
+          } else if (data.type === 'snapshot') {
+            // Partial update (e.g. pause) — merge speed/status without clearing position
+            setSnapshot(prev => prev ? { ...prev, speedMph: data.speedMph ?? 0, status: data.status ?? prev.status } : prev);
           }
         } catch { }
       };

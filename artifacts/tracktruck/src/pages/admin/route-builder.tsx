@@ -499,6 +499,9 @@ export default function RouteBuilder() {
               speedMph: data.speedMph ?? 0,
               atStopName: data.atStopName || null,
             }));
+          } else if (data.type === 'snapshot' && data.speedMph !== undefined) {
+            // Partial update (e.g. pause) — update speed without moving the marker
+            setLiveSnapshot(prev => prev ? { ...prev, speedMph: data.speedMph } : prev);
           } else if (data.type === "route_updated") {
             refetchRoute();
           }
