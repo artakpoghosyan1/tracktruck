@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, doublePrecision, jsonb, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, doublePrecision, jsonb, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { usersTable } from "./users";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -27,7 +27,12 @@ export const routesTable = pgTable("routes", {
   customDurationS: doublePrecision("custom_duration_s"),
   customDurationEnabled: boolean("custom_duration_enabled").notNull().default(false),
   showSpeedPublic: boolean("show_speed_public").notNull().default(true),
-});
+}, (t) => [
+  // Simulation tick queries all in_progress routes every 2 s — needs index to avoid full table scan
+  index("idx_routes_status").on(t.status),
+  // Route list queries filter by userId + deletedAt on every dashboard load
+  index("idx_routes_user_deleted").on(t.userId, t.deletedAt),
+]);
 
 export const insertRouteSchema = createInsertSchema(routesTable).omit({ id: true, createdAt: true, updatedAt: true, deletedAt: true });
 export type InsertRoute = z.infer<typeof insertRouteSchema>;

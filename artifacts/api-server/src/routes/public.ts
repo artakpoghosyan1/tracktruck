@@ -1,11 +1,24 @@
 import { Router, type IRouter } from "express";
 import { eq, and, isNull } from "drizzle-orm";
+import rateLimit from "express-rate-limit";
 import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
 import { GetPublicTrackParams, GetPublicTrackStateParams } from "@workspace/api-zod";
 import { validate } from "../middlewares/validate";
 import { positionAlongPolyline } from "../lib/geo";
 
 const router: IRouter = Router();
+
+// 120 requests per minute per IP — covers normal polling + WS reconnects.
+// The /state endpoint is polled on page load; /track is fetched once per page open.
+const publicTrackLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "too_many_requests", message: "Too many requests, please slow down." },
+});
+
+router.use(publicTrackLimiter);
 
 async function getRouteByToken(token: string) {
   const [shareLink] = await db
