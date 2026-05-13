@@ -529,6 +529,29 @@ export default function RouteBuilder() {
   // Use a generation counter to discard stale async routing responses
   const routingGen = useRef(0);
 
+  const handleCancelRouteChange = useCallback(() => {
+    ++routingGen.current;
+    if (existingRoute) {
+      setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
+      setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
+      setStops(existingRoute.stops.map(s => ({
+        id: `db-${s.id}`, name: s.name, lat: s.lat, lng: s.lng,
+        durationMinutes: s.durationMinutes, dbId: s.id,
+      })));
+      if (existingRoute.polyline?.length) {
+        setRouteOptions([{
+          polyline: existingRoute.polyline,
+          distanceM: existingRoute.distanceM || 0,
+          durationS: existingRoute.estimatedDurationS || 0,
+          speedProfile: existingRoute.speedProfile ?? [],
+        }]);
+        setSelectedIdx(0);
+      }
+    }
+    setRouteChangeMode(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingRoute]);
+
   // Fetch route alternatives whenever start/end, stops, or mode changes
   useEffect(() => {
     if (!start || !end || showAddStop) {
@@ -538,6 +561,9 @@ export default function RouteBuilder() {
       }
       return; // Do NOT recalculate while the user is actively adding/editing stops
     }
+    // For live/completed routes, only re-route when the user is actively in change mode.
+    // This prevents cancel (which restores start/end) from triggering a fresh fetch.
+    if (routeId && (isCompleted || (isLiveRoute && !routeChangeMode))) return;
     const gen = ++routingGen.current;
     const t = setTimeout(async () => {
       setIsRouting(true);
@@ -605,7 +631,7 @@ export default function RouteBuilder() {
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [start, end, stops, showAddStop, mapboxToken]);
+  }, [start?.lat, start?.lng, end?.lat, end?.lng, stops, showAddStop, mapboxToken, routeChangeMode]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -822,6 +848,12 @@ export default function RouteBuilder() {
     geometry: { type: 'LineString' as const, coordinates: opt.polyline },
   }));
 
+  // Key that changes whenever the route set changes to a new path (start/end moved).
+  // Forces Source remount so mapbox-gl 3.x doesn't layer old polylines on top of new ones.
+  const routeSourceKey = routeOptions[0]?.polyline?.length
+    ? `${routeOptions[0].polyline[0]?.join(',')}-${routeOptions[0].polyline[routeOptions[0].polyline.length - 1]?.join(',')}`
+    : 'empty';
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <MapboxPrompt />
@@ -925,7 +957,7 @@ export default function RouteBuilder() {
             /* In route-change mode: show Save Route Changes + Cancel */
             <>
               <button
-                onClick={() => setRouteChangeMode(false)}
+                onClick={handleCancelRouteChange}
                 disabled={isSaving}
                 className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
               >
@@ -1273,28 +1305,7 @@ export default function RouteBuilder() {
 
                   {isLiveRoute && (
                     <button
-                      onClick={() => {
-                        // Revert local state to match DB
-                        if (existingRoute) {
-                          setStart({ lng: existingRoute.startLng, lat: existingRoute.startLat, label: `${existingRoute.startLat.toFixed(4)}, ${existingRoute.startLng.toFixed(4)}` });
-                          setEnd({ lng: existingRoute.endLng, lat: existingRoute.endLat, label: `${existingRoute.endLat.toFixed(4)}, ${existingRoute.endLng.toFixed(4)}` });
-                          setStops(existingRoute.stops.map(s => ({
-                            id: `db-${s.id}`, name: s.name, lat: s.lat, lng: s.lng,
-                            durationMinutes: s.durationMinutes, dbId: s.id,
-                          })));
-                          // Restore the saved route polyline
-                          if (existingRoute.polyline?.length) {
-                            setRouteOptions([{
-                              polyline: existingRoute.polyline,
-                              distanceM: existingRoute.distanceM || 0,
-                              durationS: existingRoute.estimatedDurationS || 0,
-                              speedProfile: existingRoute.speedProfile ?? [],
-                            }]);
-                            setSelectedIdx(0);
-                          }
-                        }
-                        setRouteChangeMode(false);
-                      }}
+                      onClick={handleCancelRouteChange}
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border bg-muted hover:bg-muted/80 text-muted-foreground font-medium text-sm transition-colors"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -1496,10 +1507,11 @@ export default function RouteBuilder() {
               {/* Unselected route alternatives (grey, behind) */}
               {routeGeoJsons.map((geo, i) => {
                 if (i === selectedIdx) return null;
+                const altKey = `alt-${routeSourceKey}-${i}`;
                 return (
-                  <Source key={`alt-${i}`} id={`alt-route-${i}`} type="geojson" data={geo}>
+                  <Source key={altKey} id={altKey} type="geojson" data={geo}>
                     <Layer
-                      id={`alt-line-${i}`}
+                      id={`${altKey}-line`}
                       type="line"
                       paint={{ 'line-color': '#94a3b8', 'line-width': 4, 'line-opacity': 0.9 }}
                     />
@@ -1508,15 +1520,18 @@ export default function RouteBuilder() {
               })}
 
               {/* Selected route (colored, on top) */}
-              {polyline.length >= 2 && (
-                <Source id="selected-route" type="geojson" data={routeGeoJsons[selectedIdx]}>
-                  <Layer
-                    id="selected-line"
-                    type="line"
-                    paint={{ 'line-color': '#3b3ef4', 'line-width': 6, 'line-opacity': 1 }}
-                  />
-                </Source>
-              )}
+              {polyline.length >= 2 && (() => {
+                const selKey = `selected-${routeSourceKey}-${selectedIdx}`;
+                return (
+                  <Source key={selKey} id={selKey} type="geojson" data={routeGeoJsons[selectedIdx]}>
+                    <Layer
+                      id={`${selKey}-line`}
+                      type="line"
+                      paint={{ 'line-color': '#3b3ef4', 'line-width': 6, 'line-opacity': 1 }}
+                    />
+                  </Source>
+                );
+              })()}
 
               {/* Start marker */}
               {start && (
