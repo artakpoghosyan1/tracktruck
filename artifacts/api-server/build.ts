@@ -1,10 +1,8 @@
 import path from "path";
-import { fileURLToPath } from "url";
 import { build as esbuild } from "esbuild";
 import { rm, readFile } from "fs/promises";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = process.cwd();
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times without risking some
