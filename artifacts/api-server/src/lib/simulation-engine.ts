@@ -9,13 +9,19 @@ export function startSimulationEngine() {
   const __thisFile = fileURLToPath(import.meta.url);
   const __thisDir = path.dirname(__thisFile);
   const isDev = __thisFile.endsWith(".ts");
+
+  // Dev: bootstrap.mjs registers tsx programmatically then imports the .ts worker.
+  // Prod: esbuild-compiled simulation-worker.cjs, no loader needed.
   const workerPath = isDev
-    ? path.join(__thisDir, "simulation-worker.ts")
+    ? path.join(__thisDir, "simulation-worker-bootstrap.mjs")
     : path.join(__thisDir, "simulation-worker.cjs");
-  const workerOpts = isDev ? { execArgv: ["--import", "tsx"] } : {};
+
+  // execArgv: [] prevents the worker inheriting the parent's --loader tsx flag
+  // (set by `tsx watch`), which would conflict with our bootstrap's register() call.
+  const workerExecArgv = isDev ? { execArgv: [] as string[] } : {};
 
   const start = () => {
-    workerRef = new Worker(workerPath, workerOpts);
+    workerRef = new Worker(workerPath, workerExecArgv);
     workerRef.on("message", (msg: { type: string; token?: string; routeId?: number; data?: unknown }) => {
       if (msg.type === "broadcast_token" && msg.token != null) broadcastToToken(msg.token, msg.data);
       else if (msg.type === "broadcast_route" && msg.routeId != null) broadcastToRoute(msg.routeId, msg.data);
