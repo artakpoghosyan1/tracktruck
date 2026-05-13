@@ -59,12 +59,22 @@ export default function PublicTracking() {
   }, []);
 
   useEffect(() => {
-    if (snapshot?.lat == null || snapshot?.lng == null) {
+    // Use live WS snapshot first; fall back to HTTP snapshot (covers paused routes)
+    const effectiveSnap = snapshot ?? (route?.snapshot as typeof snapshot | null | undefined) ?? null;
+    if (effectiveSnap?.lat == null || effectiveSnap?.lng == null) {
       setMarkerPos(null);
       markerPosRef.current = null;
       return;
     }
-    const target = { lat: snapshot.lat, lng: snapshot.lng, bearing: snapshot.bearing ?? 0 };
+    const target = { lat: effectiveSnap.lat, lng: effectiveSnap.lng, bearing: effectiveSnap.bearing ?? 0 };
+
+    // Static position (no live WS data) — just place the marker, no animation
+    if (!snapshot) {
+      markerPosRef.current = target;
+      setMarkerPos({ ...target });
+      return;
+    }
+
     const from = markerPosRef.current ?? target;
     const startTime = performance.now();
 
@@ -84,7 +94,7 @@ export default function PublicTracking() {
 
     animFrameRef.current = requestAnimationFrame(animate);
     return () => { if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current); };
-  }, [snapshot, lerpBearing]);
+  }, [snapshot, route?.snapshot, lerpBearing]);
 
   // Keep refetch in a ref so the WS effect doesn't need it as a dependency
   const refetchRef = useRef(refetchRoute);
