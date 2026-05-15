@@ -1420,13 +1420,13 @@ export default function RouteBuilder() {
               </>
             )}
 
-            {/* Via Points */}
+            {/* Waypoints */}
             {!isCompleted && (
               <>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Via Points ({waypoints.length})
+                      Waypoints ({waypoints.length})
                     </h3>
                   </div>
 
@@ -1448,12 +1448,12 @@ export default function RouteBuilder() {
                     }`}
                   >
                     {showAddWaypoint ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    {showAddWaypoint ? 'Done Adding Via Points' : 'Add Via Point'}
+                    {showAddWaypoint ? 'Done Adding Waypoints' : 'Add Waypoint'}
                   </button>
 
                   {showAddWaypoint && (
                     <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
-                      <p className="text-xs font-medium text-foreground">Search or click the map — route will detour through each via point:</p>
+                      <p className="text-xs font-medium text-foreground">Search or click the map — route will pass through each waypoint:</p>
                       <AddressSearch
                         placeholder="e.g. Port, Hub, Checkpoint..."
                         mapboxToken={mapboxToken}
@@ -1486,7 +1486,7 @@ export default function RouteBuilder() {
 
                   {waypoints.length === 0 && !showAddWaypoint && (
                     <p className="text-xs text-muted-foreground py-1">
-                      Optional — force the route to detour through specific locations.
+                      Optional — add locations the route must pass through.
                     </p>
                   )}
                 </div>
@@ -1498,7 +1498,7 @@ export default function RouteBuilder() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Waypoint Stops ({stops.length})
+                  Stops ({stops.length})
                 </h3>
               </div>
 
@@ -1666,7 +1666,7 @@ export default function RouteBuilder() {
                 </Marker>
               )}
 
-              {/* Via point markers */}
+              {/* Waypoint markers */}
               {waypoints.map((wp, i) => (
                 <Marker key={wp.id} longitude={wp.lng} latitude={wp.lat} anchor="bottom">
                   <div className="flex flex-col items-center drop-shadow-lg">
