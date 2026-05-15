@@ -44,6 +44,13 @@ interface MapClickState {
   loading: boolean;
 }
 
+interface Waypoint {
+  id: string;
+  lat: number;
+  lng: number;
+  label: string;
+}
+
 async function reverseGeocode(lat: number, lng: number, mapboxToken?: string | null): Promise<string> {
   try {
     if (mapboxToken) {
@@ -227,6 +234,8 @@ export default function RouteBuilder() {
   const [end, setEnd] = useState<RoutePoint | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
+  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+  const [showAddWaypoint, setShowAddWaypoint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [speedSaving, setSpeedSaving] = useState(false);
   const [isRouting, setIsRouting] = useState(false);
@@ -293,6 +302,8 @@ export default function RouteBuilder() {
   const distance = selectedRoute?.distanceM ?? 0;
   const duration = selectedRoute?.durationS ?? 0;
   const speedProfile: SpeedSegment[] = selectedRoute?.speedProfile ?? [];
+
+  const waypointsPositionKey = waypoints.map(w => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join('|');
 
   const { data: existingRoute, refetch: refetchRoute } = useGetRoute(routeId || -1, {
     query: { enabled: !!routeId } as any,
@@ -387,6 +398,9 @@ export default function RouteBuilder() {
       lat: s.lat,
       durationMinutes: s.durationMinutes,
       sortOrder: s.sortOrder,
+    })));
+    setWaypoints(((existingRoute as any).waypoints ?? []).map((w: { lat: number; lng: number; label: string }, i: number) => ({
+      id: `db-wp-${i}`, lat: w.lat, lng: w.lng, label: w.label,
     })));
 
     // Initialize truck marker from initial snapshot (e.g. for completed routes)
@@ -538,6 +552,9 @@ export default function RouteBuilder() {
         id: `db-${s.id}`, name: s.name, lat: s.lat, lng: s.lng,
         durationMinutes: s.durationMinutes, dbId: s.id,
       })));
+      setWaypoints(((existingRoute as any).waypoints ?? []).map((w: { lat: number; lng: number; label: string }, i: number) => ({
+        id: `db-wp-${i}`, lat: w.lat, lng: w.lng, label: w.label,
+      })));
       if (existingRoute.polyline?.length) {
         setRouteOptions([{
           polyline: existingRoute.polyline,
@@ -552,14 +569,20 @@ export default function RouteBuilder() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingRoute]);
 
-  // Fetch route alternatives whenever start/end, stops, or mode changes
+  const handleAddWaypoint = (result: { placeName: string; lng: number; lat: number }) => {
+    const tempId = `client-wp-${Date.now()}`;
+    setWaypoints(prev => [...prev, { id: tempId, lat: result.lat, lng: result.lng, label: result.placeName }]);
+    if (isLiveRouteRef.current && !routeChangeMode) setRouteChangeMode(true);
+  };
+
+  // Fetch route alternatives whenever start/end, waypoints, or mode changes
   useEffect(() => {
-    if (!start || !end || showAddStop) {
+    if (!start || !end || showAddWaypoint) {
       if (!start || !end) {
         setRouteOptions([]);
         setRoutingError(null);
       }
-      return; // Do NOT recalculate while the user is actively adding/editing stops
+      return; // Do NOT recalculate while the user is actively adding/editing waypoints
     }
     // For live/completed routes, only re-route when the user is actively in change mode.
     // This prevents cancel (which restores start/end) from triggering a fresh fetch.
@@ -568,10 +591,10 @@ export default function RouteBuilder() {
     const t = setTimeout(async () => {
       setIsRouting(true);
       setRoutingError(null);
-      // Construct exact path: Start -> ...Stops -> End
+      // Construct exact path: Start -> ...Waypoints -> End
       const coords = [
         [start.lng, start.lat],
-        ...stops.map(s => [s.lng, s.lat]),
+        ...waypointsRef.current.map(w => [w.lng, w.lat]),
         [end.lng, end.lat]
       ];
 
@@ -631,7 +654,7 @@ export default function RouteBuilder() {
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [start?.lat, start?.lng, end?.lat, end?.lng, stops, showAddStop, mapboxToken, routeChangeMode]);
+  }, [start?.lat, start?.lng, end?.lat, end?.lng, waypointsPositionKey, showAddWaypoint, mapboxToken, routeChangeMode]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -673,6 +696,12 @@ export default function RouteBuilder() {
   const stopsRef = useRef(stops);
   stopsRef.current = stops;
 
+  const waypointsRef = useRef(waypoints);
+  waypointsRef.current = waypoints;
+
+  const showAddWaypointRef = useRef(showAddWaypoint);
+  showAddWaypointRef.current = showAddWaypoint;
+
   /** Persist a new stop to the DB immediately (used during live rides) */
   const saveStopToDb = useCallback(async (stop: { name: string; lat: number; lng: number; durationMinutes: number }, sortOrder: number): Promise<number | null> => {
     const id = routeIdRef.current;
@@ -708,6 +737,16 @@ export default function RouteBuilder() {
 
   const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
     const { lng, lat } = e.lngLat;
+    if (showAddWaypointRef.current) {
+      const tempId = `client-wp-${Date.now()}`;
+      const placeholder = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      setWaypoints(prev => [...prev, { id: tempId, lat, lng, label: placeholder }]);
+      reverseGeocode(lat, lng, mapboxToken).then(label => {
+        setWaypoints(ws => ws.map(w => w.id === tempId ? { ...w, label } : w));
+      });
+      if (isLiveRouteRef.current && !routeChangeMode) setRouteChangeMode(true);
+      return;
+    }
     if (showAddStopRef.current) {
       // Stop mode: always allowed — instantly place a stop marker
       const tempId = `client-${Date.now()}`;
@@ -729,7 +768,7 @@ export default function RouteBuilder() {
     setMapClick({ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, loading: true });
     const label = await reverseGeocode(lat, lng, mapboxToken);
     setMapClick({ lng, lat, label, loading: false });
-  }, [mapboxToken]);
+  }, [mapboxToken, routeChangeMode]);
 
   const applyMapClick = (type: 'start' | 'end' | 'stop') => {
     if (!mapClick) return;
@@ -766,6 +805,7 @@ export default function RouteBuilder() {
         truckSpeedMph: 60,
         polyline,
         speedProfile,
+        waypoints: waypoints.map(w => ({ lat: w.lat, lng: w.lng, label: w.label })),
         // customDurationS is sent only on create; for existing routes, use Update Speed button
         ...(!routeId && { customDurationS: useCustomDuration && customDurationMinutes > 0 ? customDurationMinutes * 60 : null }),
       };
@@ -1380,6 +1420,80 @@ export default function RouteBuilder() {
               </>
             )}
 
+            {/* Via Points */}
+            {!isCompleted && (
+              <>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Via Points ({waypoints.length})
+                    </h3>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      if (showAddWaypoint) {
+                        if (isLiveRoute && !routeChangeMode) setRouteChangeMode(true);
+                        setShowAddWaypoint(false);
+                        setMapClick(null);
+                      } else {
+                        setShowAddWaypoint(true);
+                        setShowAddStop(false);
+                        setMapClick(null);
+                      }
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddWaypoint
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                      : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-200'
+                    }`}
+                  >
+                    {showAddWaypoint ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    {showAddWaypoint ? 'Done Adding Via Points' : 'Add Via Point'}
+                  </button>
+
+                  {showAddWaypoint && (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-medium text-foreground">Search or click the map — route will detour through each via point:</p>
+                      <AddressSearch
+                        placeholder="e.g. Port, Hub, Checkpoint..."
+                        mapboxToken={mapboxToken}
+                        onSelect={handleAddWaypoint}
+                      />
+                    </div>
+                  )}
+
+                  {waypoints.length > 0 && (
+                    <div className="space-y-2">
+                      {waypoints.map((wp, i) => (
+                        <div key={wp.id} className="flex items-center gap-2 bg-violet-50 border border-violet-200 rounded-xl px-3 py-2">
+                          <div className="w-5 h-5 rounded bg-violet-600 flex items-center justify-center text-white font-bold text-[10px] shrink-0">
+                            {i + 1}
+                          </div>
+                          <span className="flex-1 text-sm font-medium truncate text-foreground">{wp.label}</span>
+                          <button
+                            onClick={() => {
+                              setWaypoints(ws => ws.filter(w => w.id !== wp.id));
+                              if (isLiveRoute && !routeChangeMode) setRouteChangeMode(true);
+                            }}
+                            className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {waypoints.length === 0 && !showAddWaypoint && (
+                    <p className="text-xs text-muted-foreground py-1">
+                      Optional — force the route to detour through specific locations.
+                    </p>
+                  )}
+                </div>
+                <hr className="border-border/50" />
+              </>
+            )}
+
             {/* Stops */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -1551,6 +1665,20 @@ export default function RouteBuilder() {
                   </div>
                 </Marker>
               )}
+
+              {/* Via point markers */}
+              {waypoints.map((wp, i) => (
+                <Marker key={wp.id} longitude={wp.lng} latitude={wp.lat} anchor="bottom">
+                  <div className="flex flex-col items-center drop-shadow-lg">
+                    <div className="flex items-center gap-1 bg-violet-600 text-white px-2 py-1 rounded-lg border-2 border-white shadow-md">
+                      <Flag className="w-3 h-3 fill-white shrink-0" />
+                      <span className="font-bold text-[11px] leading-none">{i + 1}</span>
+                    </div>
+                    <div className="w-0.5 h-3 bg-violet-600" />
+                    <div className="w-2 h-2 rounded-full bg-violet-600 border border-white" />
+                  </div>
+                </Marker>
+              ))}
 
               {/* Stop markers */}
               {stops.map((stop, i) => (

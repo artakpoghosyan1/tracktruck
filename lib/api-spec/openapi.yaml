@@ -916,6 +916,21 @@ components:
             required:
               - distanceM
               - speedMph
+        waypoints:
+          type: array
+          items:
+            type: object
+            properties:
+              lat:
+                type: number
+              lng:
+                type: number
+              label:
+                type: string
+            required:
+              - lat
+              - lng
+              - label
       required:
         - name
         - startLat
@@ -958,6 +973,21 @@ components:
             required:
               - distanceM
               - speedMph
+        waypoints:
+          type: array
+          items:
+            type: object
+            properties:
+              lat:
+                type: number
+              lng:
+                type: number
+              label:
+                type: string
+            required:
+              - lat
+              - lng
+              - label
 
     RouteListItem:
       type: object
@@ -1065,6 +1095,21 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RouteStop"
+        waypoints:
+          type: array
+          items:
+            type: object
+            properties:
+              lat:
+                type: number
+              lng:
+                type: number
+              label:
+                type: string
+            required:
+              - lat
+              - lng
+              - label
         createdAt:
           type: string
           format: date-time
@@ -1088,6 +1133,7 @@ components:
         - estimatedDurationS
         - shareLinkActive
         - stops
+        - waypoints
         - createdAt
         - updatedAt
 

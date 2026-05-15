@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CreateRouteRequestSpeedProfileItem } from "./createRouteRequestSpeedProfileItem";
+import type { CreateRouteRequestWaypointsItem } from "./createRouteRequestWaypointsItem";
 
 export interface CreateRouteRequest {
   name: string;
@@ -16,4 +17,5 @@ export interface CreateRouteRequest {
   truckSpeedMph?: number;
   polyline?: number[][];
   speedProfile?: CreateRouteRequestSpeedProfileItem[];
+  waypoints?: CreateRouteRequestWaypointsItem[];
 }

@@ -95,7 +95,7 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
 
 router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const { name, startLat, startLng, endLat, endLng, truckSpeedMph = 60, polyline = [], speedProfile = [], customDurationS } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedMph = 60, polyline = [], speedProfile = [], customDurationS, waypoints = [] } = req.body as {
     name: string;
     startLat: number;
     startLng: number;
@@ -105,6 +105,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     polyline?: number[][];
     speedProfile?: { distanceM: number; speedMph: number }[];
     customDurationS?: number | null;
+    waypoints?: { lat: number; lng: number; label: string }[];
   };
 
   const { totalPolylineDistance } = await import("../lib/geo");
@@ -139,6 +140,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
       truckSpeedMph,
       polyline,
       speedProfile,
+      waypoints,
       distanceM,
       estimatedDurationS,
       customDurationS: customDurationS ?? null,
@@ -157,6 +159,7 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     truckSpeedMph: route.truckSpeedMph,
     polyline: route.polyline,
     speedProfile: route.speedProfile,
+    waypoints: route.waypoints ?? [],
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
     shareToken: null,
@@ -209,6 +212,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
     truckSpeedMph: route.truckSpeedMph,
     polyline: route.polyline,
     speedProfile: route.speedProfile,
+    waypoints: route.waypoints ?? [],
     distanceM: route.distanceM,
     estimatedDurationS: route.estimatedDurationS,
     shareToken: shareLink?.token ?? null,
@@ -264,7 +268,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     return;
   }
 
-  const { name, startLat, startLng, endLat, endLng, truckSpeedMph, polyline, speedProfile, customDurationS } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedMph, polyline, speedProfile, customDurationS, waypoints } = req.body as {
     name?: string;
     startLat?: number;
     startLng?: number;
@@ -274,6 +278,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     polyline?: number[][];
     speedProfile?: { distanceM: number; speedMph: number }[];
     customDurationS?: number | null;
+    waypoints?: { lat: number; lng: number; label: string }[];
   };
 
   const newPolyline = polyline ?? existing.polyline ?? [];
@@ -324,6 +329,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
       ...(truckSpeedMph !== undefined && { truckSpeedMph }),
       ...(polyline !== undefined && { polyline }),
       ...(speedProfile !== undefined && { speedProfile }),
+      ...(waypoints !== undefined && { waypoints }),
       ...(customDurationS !== undefined && { customDurationS: customDurationS ?? null }),
       distanceM,
       estimatedDurationS,
@@ -388,6 +394,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     truckSpeedMph: updated.truckSpeedMph,
     polyline: updated.polyline,
     speedProfile: updated.speedProfile,
+    waypoints: updated.waypoints ?? [],
     distanceM: updated.distanceM,
     estimatedDurationS: updated.estimatedDurationS,
     shareToken: updatedShareLink?.token ?? null,
@@ -620,7 +627,7 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
 
 // Bulk replace all stops
 router.put("/routes/:id/stops/bulk", async (req, res) => {
-  const authReq = req as AuthRequest;
+  const authReq = req as unknown as AuthRequest;
   const routeId = parseInt(req.params["id"] as string);
 
   const [route] = await db

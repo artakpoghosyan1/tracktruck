@@ -75,6 +75,12 @@ export type CreateRouteRequestSpeedProfileItem = {
   speedMph: number;
 };
 
+export type CreateRouteRequestWaypointsItem = {
+  lat: number;
+  lng: number;
+  label: string;
+};
+
 export interface CreateRouteRequest {
   name: string;
   startLat: number;
@@ -84,11 +90,18 @@ export interface CreateRouteRequest {
   truckSpeedMph?: number;
   polyline?: number[][];
   speedProfile?: CreateRouteRequestSpeedProfileItem[];
+  waypoints?: CreateRouteRequestWaypointsItem[];
 }
 
 export type UpdateRouteRequestSpeedProfileItem = {
   distanceM: number;
   speedMph: number;
+};
+
+export type UpdateRouteRequestWaypointsItem = {
+  lat: number;
+  lng: number;
+  label: string;
 };
 
 export interface UpdateRouteRequest {
@@ -100,6 +113,7 @@ export interface UpdateRouteRequest {
   truckSpeedMph?: number;
   polyline?: number[][];
   speedProfile?: UpdateRouteRequestSpeedProfileItem[];
+  waypoints?: UpdateRouteRequestWaypointsItem[];
 }
 
 export type RouteListItemStatus =
@@ -148,6 +162,12 @@ export type RouteDetailSpeedProfileItem = {
   speedMph: number;
 };
 
+export type RouteDetailWaypointsItem = {
+  lat: number;
+  lng: number;
+  label: string;
+};
+
 export interface RouteStop {
   id: number;
   routeId: number;
@@ -176,6 +196,7 @@ export interface RouteDetail {
   shareToken?: string | null;
   shareLinkActive: boolean;
   stops: RouteStop[];
+  waypoints: RouteDetailWaypointsItem[];
   createdAt: string;
   updatedAt: string;
   updateCount?: number | null;

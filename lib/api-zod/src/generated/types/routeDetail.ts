@@ -7,6 +7,7 @@
  */
 import type { RouteDetailSpeedProfileItem } from "./routeDetailSpeedProfileItem";
 import type { RouteDetailStatus } from "./routeDetailStatus";
+import type { RouteDetailWaypointsItem } from "./routeDetailWaypointsItem";
 import type { RouteStop } from "./routeStop";
 
 export interface RouteDetail {
@@ -26,6 +27,7 @@ export interface RouteDetail {
   shareToken?: string | null;
   shareLinkActive: boolean;
   stops: RouteStop[];
+  waypoints: RouteDetailWaypointsItem[];
   createdAt: Date;
   updatedAt: Date;
   updateCount?: number | null;

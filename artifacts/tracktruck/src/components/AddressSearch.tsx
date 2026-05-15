@@ -60,7 +60,7 @@ export function AddressSearch({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const isFocused = useRef(false);
-  const suppressSearch = useRef(false);
+  const suppressSearch = useRef(true);
 
   useEffect(() => {
     if (value !== undefined && value !== query && !isFocused.current) {

@@ -197,6 +197,15 @@ export const CreateRouteBody = zod.object({
       }),
     )
     .optional(),
+  waypoints: zod
+    .array(
+      zod.object({
+        lat: zod.number(),
+        lng: zod.number(),
+        label: zod.string(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -256,6 +265,13 @@ export const GetRouteResponse = zod.object({
       createdAt: zod.date(),
     }),
   ),
+  waypoints: zod.array(
+    zod.object({
+      lat: zod.number(),
+      lng: zod.number(),
+      label: zod.string(),
+    }),
+  ),
   createdAt: zod.date(),
   updatedAt: zod.date(),
   updateCount: zod.number().nullish(),
@@ -291,6 +307,15 @@ export const UpdateRouteBody = zod.object({
       zod.object({
         distanceM: zod.number(),
         speedMph: zod.number(),
+      }),
+    )
+    .optional(),
+  waypoints: zod
+    .array(
+      zod.object({
+        lat: zod.number(),
+        lng: zod.number(),
+        label: zod.string(),
       }),
     )
     .optional(),
@@ -344,6 +369,13 @@ export const UpdateRouteResponse = zod.object({
       durationMinutes: zod.number(),
       sortOrder: zod.number(),
       createdAt: zod.date(),
+    }),
+  ),
+  waypoints: zod.array(
+    zod.object({
+      lat: zod.number(),
+      lng: zod.number(),
+      label: zod.string(),
     }),
   ),
   createdAt: zod.date(),
