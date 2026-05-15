@@ -513,8 +513,8 @@ async function tick() {
     const stopRampFactor = (timeSinceStopExitS >= 0 && timeSinceStopExitS < effectiveRampUpS) ? timeSinceStopExitS / effectiveRampUpS : 1.0;
     const rampFactor = isAtAnyStop ? 0 : stopRampFactor;
 
-    const displayBaseSpeedMph = speedMultiplier < 1 ? route.truckSpeedMph * speedMultiplier : baseSpeedMph;
-    const targetSpeedMph = isAtAnyStop ? 0 : Math.min(75, Math.max(0, displayBaseSpeedMph * fluctMult * combinedBrakeFactor));
+    const displayBaseSpeedMph = baseSpeedMph * speedMultiplier;
+    const targetSpeedMph = isAtAnyStop ? 0 : Math.max(0, displayBaseSpeedMph * fluctMult * combinedBrakeFactor);
     const currentSpeedMph = Math.max(0, Math.round(targetSpeedMph * rampFactor));
 
     let displayLat = pos.lat, displayLng = pos.lng;

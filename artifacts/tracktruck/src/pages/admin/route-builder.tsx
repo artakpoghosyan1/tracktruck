@@ -1773,7 +1773,7 @@ export default function RouteBuilder() {
               }}
               mapStyle="mapbox://styles/mapbox/streets-v12"
               projection={{ name: 'mercator' }}
-              cursor="crosshair"
+              cursor={showAddStop || routeChangeMode || showAddWaypoint || !start || !end ? 'crosshair' : 'grab'}
               onClick={handleMapClick}
               onMouseMove={showAddStop ? handleMapMouseMove : undefined}
               onMouseLeave={() => setHoverSnap(null)}
