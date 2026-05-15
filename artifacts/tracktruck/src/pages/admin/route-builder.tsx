@@ -88,64 +88,13 @@ function routeLabel(idx: number, option: RouteOption, allOptions: RouteOption[])
 const AnimatedTruckMarker = memo(({ snapshot }: {
   snapshot: { lat: number; lng: number; bearing: number } | null;
 }) => {
-  const TICK_MS = 2000;
-  const [pos, setPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
-  const posRef = useRef<{ lat: number; lng: number; bearing: number } | null>(null);
-  const animRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (snapshot?.lat == null || snapshot?.lng == null) {
-      setPos(null);
-      posRef.current = null;
-      return;
-    }
-    const target = { lat: snapshot.lat, lng: snapshot.lng, bearing: snapshot.bearing };
-
-    // If it's the first snapshot, jump to it immediately
-    if (!posRef.current) {
-      setPos(target);
-      posRef.current = target;
-      return;
-    }
-
-    const from = posRef.current;
-    const startTime = performance.now();
-    if (animRef.current != null) cancelAnimationFrame(animRef.current);
-
-    const animate = (now: number) => {
-      const elapsed = now - startTime;
-      const t = Math.min(elapsed / TICK_MS, 1);
-
-      let bdiff = target.bearing - from.bearing;
-      if (bdiff > 180) bdiff -= 360;
-      if (bdiff < -180) bdiff += 360;
-
-      const p = {
-        lat: from.lat + (target.lat - from.lat) * t,
-        lng: from.lng + (target.lng - from.lng) * t,
-        bearing: from.bearing + bdiff * t,
-      };
-
-      posRef.current = p;
-      setPos(p);
-
-      if (t < 1) {
-        animRef.current = requestAnimationFrame(animate);
-      }
-    };
-
-    animRef.current = requestAnimationFrame(animate);
-    return () => { if (animRef.current != null) cancelAnimationFrame(animRef.current); };
-  }, [snapshot]);
-
-  if (!pos) return null;
+  if (!snapshot) return null;
   return (
-    <Marker longitude={pos.lng} latitude={pos.lat} anchor="center">
+    <Marker longitude={snapshot.lng} latitude={snapshot.lat} anchor="center">
       <div className="relative flex items-center justify-center">
-        <div className="absolute w-12 h-12 rounded-full bg-primary/25 animate-ping" />
         <div
           className="relative z-10 drop-shadow-xl"
-          style={{ transform: `rotate(${pos.bearing}deg)` }}
+          style={{ transform: `rotate(${snapshot.bearing}deg)` }}
         >
           <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
             <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />

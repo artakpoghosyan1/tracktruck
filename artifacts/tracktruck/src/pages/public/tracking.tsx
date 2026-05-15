@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "wouter";
 import Map, { Marker, MapRef } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
@@ -39,62 +39,14 @@ export default function PublicTracking() {
   useEffect(() => {
     if (route && !['in_progress', 'paused', 'completed'].includes(route.status)) {
       setSnapshot(null);
-      setMarkerPos(null);
-      markerPosRef.current = null;
     }
   }, [route?.status]);
 
-  // Smoothly interpolated marker position — animates from previous to new
-  // position over one server-tick interval so the truck glides continuously.
-  const TICK_MS = 2000;
-  const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
-  const markerPosRef = useRef<{ lat: number; lng: number; bearing: number } | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-
-  const lerpBearing = useCallback((from: number, to: number, t: number) => {
-    let diff = to - from;
-    if (diff > 180) diff -= 360;
-    if (diff < -180) diff += 360;
-    return from + diff * t;
-  }, []);
-
-  useEffect(() => {
-    // Use live WS snapshot first; fall back to HTTP snapshot (covers paused routes)
-    const effectiveSnap = snapshot ?? (route?.snapshot as typeof snapshot | null | undefined) ?? null;
-    if (effectiveSnap?.lat == null || effectiveSnap?.lng == null) {
-      setMarkerPos(null);
-      markerPosRef.current = null;
-      return;
-    }
-    const target = { lat: effectiveSnap.lat, lng: effectiveSnap.lng, bearing: effectiveSnap.bearing ?? 0 };
-
-    // Static position (no live WS data) — just place the marker, no animation
-    if (!snapshot) {
-      markerPosRef.current = target;
-      setMarkerPos({ ...target });
-      return;
-    }
-
-    const from = markerPosRef.current ?? target;
-    const startTime = performance.now();
-
-    if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current);
-
-    const animate = (now: number) => {
-      const t = Math.min((now - startTime) / TICK_MS, 1);
-      const pos = {
-        lat: from.lat + (target.lat - from.lat) * t,
-        lng: from.lng + (target.lng - from.lng) * t,
-        bearing: lerpBearing(from.bearing, target.bearing, t),
-      };
-      markerPosRef.current = pos;
-      setMarkerPos({ ...pos });
-      if (t < 1) animFrameRef.current = requestAnimationFrame(animate);
-    };
-
-    animFrameRef.current = requestAnimationFrame(animate);
-    return () => { if (animFrameRef.current != null) cancelAnimationFrame(animFrameRef.current); };
-  }, [snapshot, route?.snapshot, lerpBearing]);
+  // Snap marker directly to each server tick position — no interpolation
+  const effectiveSnap = snapshot ?? (route?.snapshot as typeof snapshot | null | undefined) ?? null;
+  const markerPos = (effectiveSnap?.lat != null && effectiveSnap?.lng != null)
+    ? { lat: effectiveSnap.lat, lng: effectiveSnap.lng, bearing: effectiveSnap.bearing ?? 0 }
+    : null;
 
   // Keep refetch in a ref so the WS effect doesn't need it as a dependency
   const refetchRef = useRef(refetchRoute);
@@ -379,17 +331,14 @@ export default function PublicTracking() {
           {/* Live Truck — position updated via smooth rAF interpolation */}
           {markerPos && (
             <Marker longitude={markerPos.lng} latitude={markerPos.lat} anchor="center">
-              <div className="relative flex items-center justify-center">
-                <div className="absolute w-14 h-14 rounded-full bg-primary/30 animate-ping" />
-                <div
-                  className="relative z-10 drop-shadow-xl"
-                  style={{ transform: `rotate(${markerPos.bearing}deg)` }}
-                >
-                  <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-                    <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />
-                    <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white" />
-                  </svg>
-                </div>
+              <div
+                className="drop-shadow-xl"
+                style={{ transform: `rotate(${markerPos.bearing}deg)` }}
+              >
+                <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+                  <circle cx="22" cy="22" r="20" fill="#3b3ef4" stroke="white" strokeWidth="2.5" />
+                  <path d="M22 9 L29 30 L22 25.5 L15 30 Z" fill="white" />
+                </svg>
               </div>
             </Marker>
           )}
