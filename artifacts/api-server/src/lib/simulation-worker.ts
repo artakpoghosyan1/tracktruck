@@ -416,8 +416,7 @@ async function tick() {
     const lastStopExitS = lastStopExitSMap.get(route.id) ?? -Infinity;
     const timeSinceStopExitS = isAtAnyStop ? 0 : totalElapsedS - lastStopExitS;
     const stopRampFactor = timeSinceStopExitS < RAMP_UP_S ? timeSinceStopExitS / RAMP_UP_S : 1.0;
-    const adminRampFactor = Math.min(1.0, wallElapsedMs / 1000 / RAMP_UP_S);
-    const rampFactor = isAtAnyStop ? 0 : Math.min(stopRampFactor, adminRampFactor);
+    const rampFactor = isAtAnyStop ? 0 : stopRampFactor;
 
     const targetSpeedMph = isAtAnyStop ? 0 : Math.min(75, Math.max(0, baseSpeedMph * speedMultiplier * fluctMult * combinedBrakeFactor));
     const currentSpeedMph = Math.max(0, Math.round(targetSpeedMph * rampFactor));
