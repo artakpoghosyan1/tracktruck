@@ -42,3 +42,8 @@ export function startSimulationEngine() {
 export function invalidateRouteCache(routeId: number) {
   workerRef?.postMessage({ type: "invalidate_cache", routeId });
 }
+
+export function resumeRouteFromCurrentPosition(routeId: number) {
+  workerRef?.postMessage({ type: "invalidate_cache", routeId });
+  workerRef?.postMessage({ type: "resume_from_position", routeId });
+}

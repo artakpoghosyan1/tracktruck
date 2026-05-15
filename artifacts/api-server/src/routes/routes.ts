@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, ilike, desc, asc, isNull, sql, count } from "drizzle-orm";
 import { db, routesTable, routeStopsTable, shareLinksTable, simulationStatesTable } from "@workspace/db";
 import { positionAlongPolyline } from "../lib/geo";
-import { invalidateRouteCache } from "../lib/simulation-engine";
+import { invalidateRouteCache, resumeRouteFromCurrentPosition } from "../lib/simulation-engine";
 import { broadcastToToken, broadcastToRoute } from "./ws";
 import {
   ListRoutesQueryParams,
@@ -650,6 +650,11 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
     stops: { name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number }[];
   };
 
+  const [{ oldCount }] = await db
+    .select({ oldCount: sql<number>`count(*)::int` })
+    .from(routeStopsTable)
+    .where(eq(routeStopsTable.routeId, routeId));
+
   await db.transaction(async (tx) => {
     // Delete all existing stops
     await tx.delete(routeStopsTable).where(eq(routeStopsTable.routeId, routeId));
@@ -668,7 +673,12 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
     }
   });
 
-  invalidateRouteCache(routeId);
+  const stopWasRemoved = (stops?.length ?? 0) < oldCount;
+  if (stopWasRemoved && route.status === "in_progress") {
+    resumeRouteFromCurrentPosition(routeId);
+  } else {
+    invalidateRouteCache(routeId);
+  }
 
   if (["in_progress", "paused"].includes(route.status)) {
     const routeUpdatedMsg = { type: "route_updated", routeId: route.id };
@@ -787,7 +797,11 @@ router.delete("/routes/:id/stops/:stopId", validate({ params: DeleteStopParams }
 
   await db.delete(routeStopsTable).where(and(eq(routeStopsTable.id, stopId), eq(routeStopsTable.routeId, routeId)));
 
-  invalidateRouteCache(routeId);
+  if (route.status === "in_progress") {
+    resumeRouteFromCurrentPosition(routeId);
+  } else {
+    invalidateRouteCache(routeId);
+  }
 
   // Notify live viewers so the truck starts moving immediately
   if (["in_progress", "paused"].includes(route.status)) {

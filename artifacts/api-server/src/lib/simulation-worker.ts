@@ -215,6 +215,28 @@ function computePositionWithStops(
   return { ...positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM), atStopName: null };
 }
 
+// Inverse of computePositionWithStops: given a distance along the polyline,
+// return the total elapsed seconds needed to reach it (accounting for stops before it).
+function timeToReachDistanceM(
+  targetDistM: number,
+  sortedStops: StopEntry[],
+  speedProfile: SpeedSegment[],
+  fallbackSpeedMph: number,
+  speedMultiplier: number,
+): number {
+  let elapsed = 0;
+  let consumed = 0;
+  for (const stop of sortedStops) {
+    if (stop.distanceAlongPolylineM >= targetDistM) break;
+    const legDistM = Math.max(0, stop.distanceAlongPolylineM - consumed);
+    elapsed += timeForDistance(legDistM, trimSpeedProfile(speedProfile, consumed), fallbackSpeedMph) / speedMultiplier;
+    elapsed += stop.durationS;
+    consumed = stop.distanceAlongPolylineM;
+  }
+  elapsed += timeForDistance(Math.max(0, targetDistM - consumed), trimSpeedProfile(speedProfile, consumed), fallbackSpeedMph) / speedMultiplier;
+  return elapsed;
+}
+
 // ---------------------------------------------------------------------------
 // Route cache
 // ---------------------------------------------------------------------------
@@ -222,6 +244,7 @@ const COMPLETION_GRACE_S = 5;
 const completionGraceMap = new Map<number, number>();
 const wasAtStopMap = new Map<number, boolean>();
 const lastStopExitSMap = new Map<number, number>();
+const resumeFromPositionSet = new Set<number>();
 let tickCount = 0;
 
 interface CachedRoute {
@@ -334,13 +357,28 @@ async function tick() {
 
     cache.lastAccessedTick = tickCount;
 
-    const wallElapsedMs = Math.max(0, nowMs - simState.startedAt.getTime());
-    const totalElapsedMs = Math.max(0, simState.effectiveElapsedMs + wallElapsedMs);
-    const totalElapsedS = totalElapsedMs / 1000;
-    const polyline = cache.polyline;
-
     const speedMultiplier = (route.customDurationEnabled && route.customDurationS && route.customDurationS > 0)
       ? (route.estimatedDurationS / route.customDurationS) : 1.0;
+
+    // When a stop is deleted while the truck is waiting at it, reset effectiveElapsedMs
+    // so the truck continues from that position rather than jumping forward.
+    let effectiveElapsedMs = simState.effectiveElapsedMs;
+    let startedAtMs = simState.startedAt.getTime();
+    if (resumeFromPositionSet.has(route.id)) {
+      resumeFromPositionSet.delete(route.id);
+      const resumeDistM = simState.distanceTraveledM ?? 0;
+      const adjustedElapsedS = timeToReachDistanceM(resumeDistM, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier);
+      effectiveElapsedMs = adjustedElapsedS * 1000;
+      startedAtMs = nowMs;
+      await db.update(simulationStatesTable)
+        .set({ effectiveElapsedMs, startedAt: new Date(nowMs) })
+        .where(eq(simulationStatesTable.routeId, route.id));
+    }
+
+    const wallElapsedMs = Math.max(0, nowMs - startedAtMs);
+    const totalElapsedMs = Math.max(0, effectiveElapsedMs + wallElapsedMs);
+    const totalElapsedS = totalElapsedMs / 1000;
+    const polyline = cache.polyline;
 
     const pos = computePositionWithStops(totalElapsedS, polyline, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier);
 
@@ -404,6 +442,7 @@ async function tick() {
       completionGraceMap.delete(route.id);
       wasAtStopMap.delete(route.id);
       lastStopExitSMap.delete(route.id);
+      resumeFromPositionSet.delete(route.id);
       invalidateLocalCache(route.id);
       completions.push({ routeId: route.id, elapsedMs: totalElapsedMs, distM: pos.distanceTraveledM, prog: pos.progressPercent });
     } else if (tickCount % DB_SAVE_INTERVAL_TICKS === 0) {
@@ -437,6 +476,8 @@ function evictStaleCache() {
 parentPort.on("message", (msg: { type: string; routeId?: number }) => {
   if (msg.type === "invalidate_cache" && msg.routeId != null) {
     invalidateLocalCache(msg.routeId);
+  } else if (msg.type === "resume_from_position" && msg.routeId != null) {
+    resumeFromPositionSet.add(msg.routeId);
   }
 });
 

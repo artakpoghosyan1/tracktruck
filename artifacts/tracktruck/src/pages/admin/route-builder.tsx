@@ -72,6 +72,32 @@ async function reverseGeocode(lat: number, lng: number, mapboxToken?: string | n
   }
 }
 
+function snapToPolyline(lat: number, lng: number, polyline: number[][]): { lat: number; lng: number } {
+  if (polyline.length === 0) return { lat, lng };
+  if (polyline.length === 1) return { lat: polyline[0][1], lng: polyline[0][0] };
+
+  let bestDistSq = Infinity;
+  let bestLat = polyline[0][1];
+  let bestLng = polyline[0][0];
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const ax = polyline[i][0], ay = polyline[i][1];
+    const bx = polyline[i + 1][0], by = polyline[i + 1][1];
+    const abx = bx - ax, aby = by - ay;
+    const lenSq = abx * abx + aby * aby;
+    const t = lenSq > 0 ? Math.max(0, Math.min(1, ((lng - ax) * abx + (lat - ay) * aby) / lenSq)) : 0;
+    const snapLng = ax + t * abx;
+    const snapLat = ay + t * aby;
+    const distSq = (lng - snapLng) ** 2 + (lat - snapLat) ** 2;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestLat = snapLat;
+      bestLng = snapLng;
+    }
+  }
+  return { lat: bestLat, lng: bestLng };
+}
+
 function routeLabel(idx: number, option: RouteOption, allOptions: RouteOption[]): string {
   if (allOptions.length === 1) return "Recommended";
   const shortest = [...allOptions].sort((a, b) => a.distanceM - b.distanceM)[0];
@@ -183,6 +209,7 @@ export default function RouteBuilder() {
   const [end, setEnd] = useState<RoutePoint | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
+  const [hoverSnap, setHoverSnap] = useState<{ lat: number; lng: number } | null>(null);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [showAddWaypoint, setShowAddWaypoint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -493,6 +520,7 @@ export default function RouteBuilder() {
   // Set true when a waypoint change triggered routing — bypasses the live-route guard
   // without touching routeChangeMode (keeps waypoint flow fully separate from Change Route flow)
   const waypointDirtyRef = useRef(false);
+  const stopDirtyRef = useRef(false);
 
   // Use a generation counter to discard stale async routing responses
   const routingGen = useRef(0);
@@ -634,11 +662,15 @@ export default function RouteBuilder() {
 
   const handleAddStop = async (result: { placeName: string; lng: number; lat: number }) => {
     const tempId = `client-${Date.now()}`;
-    setStops(prev => {
-      const newStop: Stop = { id: tempId, name: result.placeName, lat: result.lat, lng: result.lng, durationMinutes: 15 };
-      return [...prev, newStop];
+    const snapped = snapToPolyline(result.lat, result.lng, polylineRef.current);
+    const placeholder = `${snapped.lat.toFixed(4)}, ${snapped.lng.toFixed(4)}`;
+
+    stopDirtyRef.current = true;
+    setStops(prev => [...prev, { id: tempId, name: placeholder, lat: snapped.lat, lng: snapped.lng, durationMinutes: 15 }]);
+
+    reverseGeocode(snapped.lat, snapped.lng, mapboxToken).then(label => {
+      setStops(s => s.map(x => x.id === tempId ? { ...x, name: label } : x));
     });
-    // Do NOT set showAddStop(false) here so they can keep clicking/adding
   };
 
   const showAddStopRef = useRef(showAddStop);
@@ -683,18 +715,6 @@ export default function RouteBuilder() {
     }
   }, []);
 
-  /** Delete a stop from the DB (used during live rides) */
-  const deleteStopFromDb = useCallback(async (dbId: number) => {
-    const id = routeIdRef.current;
-    if (!id) return;
-    try {
-      await fetch(`/api/routes/${id}/stops/${dbId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
-      });
-    } catch { /* silent */ }
-  }, []);
-
   const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
     const { lng, lat } = e.lngLat;
     if (showAddWaypointRef.current) {
@@ -708,18 +728,15 @@ export default function RouteBuilder() {
       return;
     }
     if (showAddStopRef.current) {
-      // Stop mode: always allowed — instantly place a stop marker
+      const snapped = snapToPolyline(lat, lng, polylineRef.current);
       const tempId = `client-${Date.now()}`;
-      const placeholder = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      const placeholder = `${snapped.lat.toFixed(4)}, ${snapped.lng.toFixed(4)}`;
 
-      // Save local state immediately
-      setStops(prev => {
-        const newStop: Stop = { id: tempId, name: placeholder, lat, lng, durationMinutes: 15 };
-        return [...prev, newStop];
-      });
+      stopDirtyRef.current = true;
+      setStops(prev => [...prev, { id: tempId, name: placeholder, lat: snapped.lat, lng: snapped.lng, durationMinutes: 15 }]);
 
-      reverseGeocode(lat, lng, mapboxToken).then(async label => {
-        setStops(s => s.map(x => (x.id === tempId || x.lat === lat && x.lng === lng && x.name === placeholder) ? { ...x, name: label } : x));
+      reverseGeocode(snapped.lat, snapped.lng, mapboxToken).then(label => {
+        setStops(s => s.map(x => x.id === tempId ? { ...x, name: label } : x));
       });
       return;
     }
@@ -729,6 +746,12 @@ export default function RouteBuilder() {
     const label = await reverseGeocode(lat, lng, mapboxToken);
     setMapClick({ lng, lat, label, loading: false });
   }, [mapboxToken, routeChangeMode]);
+
+  const handleMapMouseMove = useCallback((e: mapboxgl.MapMouseEvent) => {
+    if (!showAddStopRef.current || polylineRef.current.length < 2) return;
+    const { lng, lat } = e.lngLat;
+    setHoverSnap(snapToPolyline(lat, lng, polylineRef.current));
+  }, []);
 
   const applyMapClick = (type: 'start' | 'end' | 'stop') => {
     if (!mapClick) return;
@@ -782,7 +805,7 @@ export default function RouteBuilder() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
         body: JSON.stringify({
-          stops: stops.map((s, i) => ({ name: s.name, lat: s.lat, lng: s.lng, durationMinutes: s.durationMinutes, sortOrder: i }))
+          stops: stopsRef.current.map((s, i) => ({ name: s.name, lat: s.lat, lng: s.lng, durationMinutes: s.durationMinutes, sortOrder: i }))
         })
       });
       if (!bulkRes.ok) {
@@ -1404,11 +1427,11 @@ export default function RouteBuilder() {
                       }
                     }}
                     className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddWaypoint
-                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                      ? 'bg-violet-600/80 text-white hover:bg-violet-600/70 shadow-violet-200'
                       : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-200'
                     }`}
                   >
-                    {showAddWaypoint ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    {showAddWaypoint ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                     {showAddWaypoint ? 'Done Adding Waypoints' : 'Add Waypoint'}
                   </button>
 
@@ -1467,20 +1490,23 @@ export default function RouteBuilder() {
               <button
                 onClick={() => { 
                   if (showAddStop) {
-                    shouldSaveAfterRecalc.current = true;
+                    const dirty = stopDirtyRef.current;
+                    stopDirtyRef.current = false;
                     setShowAddStop(false);
+                    setHoverSnap(null);
                     setMapClick(null);
+                    if (dirty) setTimeout(() => handleSave(false, true), 50);
                   } else {
                     setShowAddStop(true);
                     setMapClick(null);
                   }
                 }}
                 className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddStop
-                  ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
-                  : 'bg-primary text-white hover:bg-primary/90 shadow-primary/20'
-                  }`}
+                  ? 'bg-teal-600/80 text-white hover:bg-teal-600/70 shadow-teal-200'
+                  : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-200'
+                }`}
               >
-                {showAddStop ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {showAddStop ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
               </button>
 
@@ -1507,13 +1533,15 @@ export default function RouteBuilder() {
                           atStopName={atStopName}
                           countdownSec={atStopName === stop.name ? countdownSec : null}
                           onRemove={(id) => {
-                            setStops(s => {
-                              const removing = s.find(x => x.id === id);
-                              if (routeId && removing?.dbId) {
-                                deleteStopFromDb(removing.dbId);
-                              }
-                              return s.filter(x => x.id !== id);
-                            });
+                            const newStops = stopsRef.current.filter(x => x.id !== id);
+                            setStops(newStops);
+                            if (routeId) {
+                              fetch(`/api/routes/${routeId}/stops/bulk`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+                                body: JSON.stringify({ stops: newStops.map((s, i) => ({ name: s.name, lat: s.lat, lng: s.lng, durationMinutes: s.durationMinutes, sortOrder: i })) }),
+                              }).catch(() => {});
+                            }
                           }}
                           onChangeName={(id, val) => setStops(s => s.map(x => x.id === id ? { ...x, name: val } : x))}
                           onChangeDuration={(id, val) => {
@@ -1579,6 +1607,8 @@ export default function RouteBuilder() {
               projection={{ name: 'mercator' }}
               cursor="crosshair"
               onClick={handleMapClick}
+              onMouseMove={showAddStop ? handleMapMouseMove : undefined}
+              onMouseLeave={() => setHoverSnap(null)}
             >
               {/* Unselected route alternatives (grey, behind) */}
               {routeGeoJsons.map((geo, i) => {
@@ -1641,6 +1671,13 @@ export default function RouteBuilder() {
                   </div>
                 </Marker>
               ))}
+
+              {/* Hover snap preview */}
+              {showAddStop && hoverSnap && polyline.length >= 2 && (
+                <Marker longitude={hoverSnap.lng} latitude={hoverSnap.lat} anchor="center">
+                  <div className="w-5 h-5 rounded-full bg-primary/30 border-2 border-primary shadow-md pointer-events-none" />
+                </Marker>
+              )}
 
               {/* Stop markers */}
               {stops.map((stop, i) => (
