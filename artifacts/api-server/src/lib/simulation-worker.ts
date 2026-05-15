@@ -408,17 +408,21 @@ async function tick() {
     const closestEventM = Math.min(distToNextStopM, distToEndM);
 
     const BRAKING_ZONE_M = 220;
-    const drivingBrakeFactor = inGracePeriod ? 0 : closestEventM < BRAKING_ZONE_M ? Math.max(0.05, closestEventM / BRAKING_ZONE_M) : 1.0;
+    const effectiveSpeedMph = Math.min(route.truckSpeedMph * speedMultiplier, 60);
+    const effectiveBrakingZoneM = BRAKING_ZONE_M * Math.pow(effectiveSpeedMph / 60, 2);
+    const drivingBrakeFactor = inGracePeriod ? 0 : closestEventM < effectiveBrakingZoneM ? Math.max(0.05, closestEventM / effectiveBrakingZoneM) : 1.0;
     const graceBrakeFactor = inGracePeriod ? Math.max(0, 1 - graceElapsedS / COMPLETION_GRACE_S) : 1.0;
     const combinedBrakeFactor = drivingBrakeFactor * graceBrakeFactor;
 
-    const fluctMult = 1.0 + Math.sin(totalElapsedS / 22) * 0.08 + Math.sin(totalElapsedS / 7) * 0.04 + Math.sin(totalElapsedS / 3) * 0.02;
+    const fluctMult = 1.0 + Math.sin(totalElapsedS / 22) * 0.06 + Math.sin(totalElapsedS / 7) * 0.03 + Math.sin(totalElapsedS / 3) * 0.01;
+    const effectiveRampUpS = RAMP_UP_S * Math.max(0.25, effectiveSpeedMph / 60);
     const lastStopExitS = lastStopExitSMap.get(route.id) ?? -Infinity;
     const timeSinceStopExitS = isAtAnyStop ? 0 : totalElapsedS - lastStopExitS;
-    const stopRampFactor = timeSinceStopExitS < RAMP_UP_S ? timeSinceStopExitS / RAMP_UP_S : 1.0;
+    const stopRampFactor = timeSinceStopExitS < effectiveRampUpS ? timeSinceStopExitS / effectiveRampUpS : 1.0;
     const rampFactor = isAtAnyStop ? 0 : stopRampFactor;
 
-    const targetSpeedMph = isAtAnyStop ? 0 : Math.min(75, Math.max(0, baseSpeedMph * speedMultiplier * fluctMult * combinedBrakeFactor));
+    const displayBaseSpeedMph = speedMultiplier < 1 ? route.truckSpeedMph * speedMultiplier : baseSpeedMph;
+    const targetSpeedMph = isAtAnyStop ? 0 : Math.min(75, Math.max(0, displayBaseSpeedMph * fluctMult * combinedBrakeFactor));
     const currentSpeedMph = Math.max(0, Math.round(targetSpeedMph * rampFactor));
 
     let displayLat = pos.lat, displayLng = pos.lng;
