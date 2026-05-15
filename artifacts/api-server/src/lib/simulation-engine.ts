@@ -6,7 +6,12 @@ import { broadcastToToken, broadcastToRoute } from "../routes/ws";
 let workerRef: Worker | null = null;
 
 export function startSimulationEngine() {
-  const __thisFile = fileURLToPath(import.meta.url);
+  // In the esbuild CJS bundle __filename is injected by esbuild; in ESM dev
+  // (tsx) we fall back to fileURLToPath(import.meta.url).
+  const __thisFile =
+    typeof __filename !== "undefined"
+      ? __filename
+      : fileURLToPath(import.meta.url);
   const __thisDir = path.dirname(__thisFile);
   const isDev = __thisFile.endsWith(".ts");
 
