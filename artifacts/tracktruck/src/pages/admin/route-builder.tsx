@@ -214,6 +214,7 @@ export default function RouteBuilder() {
   const [isSaving, setIsSaving] = useState(false);
   const [speedSaving, setSpeedSaving] = useState(false);
   const [trafficMode, setTrafficMode] = useState(false);
+  const trafficModeRef = useRef(false);
   const [trafficLoading, setTrafficLoading] = useState(false);
   const preTrafficStateRef = useRef<{ enabled: boolean; durationS: number | null } | null>(null);
   const [isRouting, setIsRouting] = useState(false);
@@ -347,12 +348,15 @@ export default function RouteBuilder() {
 
   const handleTrafficToggle = async () => {
     if (!routeId || !existingRoute) return;
+    const nextMode = !trafficMode;
+    setTrafficMode(nextMode);
+    trafficModeRef.current = nextMode;
     setTrafficLoading(true);
     try {
       const er = existingRoute as any;
       let body: Record<string, unknown>;
 
-      if (!trafficMode) {
+      if (nextMode) {
         const estimatedDurationS: number = er.estimatedDurationS ?? 0;
         const truckSpeedMph: number = er.truckSpeedMph ?? 60;
         const trafficSpeedMph = Math.floor(Math.random() * 4) + 19; // 19–22 mph
@@ -382,9 +386,9 @@ export default function RouteBuilder() {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('Failed to toggle traffic mode');
-      setTrafficMode(prev => !prev);
-      await refetchRoute();
     } catch (err: any) {
+      setTrafficMode(!nextMode);
+      trafficModeRef.current = !nextMode;
       toast({ title: "Failed", description: err?.message || "Could not toggle traffic mode", variant: "destructive" });
     } finally {
       setTrafficLoading(false);
@@ -435,10 +439,12 @@ export default function RouteBuilder() {
       setSelectedIdx(0);
     }
 
-    const er2 = existingRoute as any;
-    setUseCustomDuration(er2.customDurationEnabled ?? false);
-    if (er2.customDurationS) {
-      setCustomDurationMinutes(Math.round(er2.customDurationS / 60));
+    if (!trafficModeRef.current) {
+      const er2 = existingRoute as any;
+      setUseCustomDuration(er2.customDurationEnabled ?? false);
+      if (er2.customDurationS) {
+        setCustomDurationMinutes(Math.round(er2.customDurationS / 60));
+      }
     }
     const er = existingRoute as any;
     setShowSpeedPublic(er.showSpeedPublic ?? true);
@@ -448,12 +454,14 @@ export default function RouteBuilder() {
   useEffect(() => {
     if (!['in_progress', 'paused'].includes(existingRoute?.status ?? '')) {
       setTrafficMode(false);
+      trafficModeRef.current = false;
       preTrafficStateRef.current = null;
     }
   }, [existingRoute?.status]);
 
   useEffect(() => {
     setTrafficMode(false);
+    trafficModeRef.current = false;
     preTrafficStateRef.current = null;
   }, [routeId]);
 
@@ -1287,7 +1295,7 @@ export default function RouteBuilder() {
                     className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
                   />
                   <span className="text-sm font-semibold text-foreground">Custom simulation time</span>
-                  {(existingRoute as any)?.customDurationEnabled && (
+                  {!trafficMode && (existingRoute as any)?.customDurationEnabled && (
                     <span className="ml-auto text-xs font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Active</span>
                   )}
                 </label>
@@ -1355,7 +1363,7 @@ export default function RouteBuilder() {
                 )}
 
                 {/* Reset to default — only shown when a custom duration is saved */}
-                {routeId && existingRoute && (existingRoute as any).customDurationEnabled && (
+                {routeId && existingRoute && !trafficMode && (existingRoute as any).customDurationEnabled && (
                   <button
                     onClick={async () => {
                       setSpeedSaving(true);
