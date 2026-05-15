@@ -299,6 +299,8 @@ export default function RouteBuilder() {
   // The currently chosen route data
   const selectedRoute = routeOptions[selectedIdx] ?? null;
   const polyline = selectedRoute?.polyline ?? [];
+  const polylineRef = useRef(polyline);
+  polylineRef.current = polyline;
   const distance = selectedRoute?.distanceM ?? 0;
   const duration = selectedRoute?.durationS ?? 0;
   const speedProfile: SpeedSegment[] = selectedRoute?.speedProfile ?? [];
@@ -539,6 +541,9 @@ export default function RouteBuilder() {
   // Removed Auto-Save completely per user request. 
   // We will now explicitly save when "Done Adding Stops" completes its Polyline recalculation!
   const shouldSaveAfterRecalc = useRef(false);
+  // Set true when a waypoint change triggered routing — bypasses the live-route guard
+  // without touching routeChangeMode (keeps waypoint flow fully separate from Change Route flow)
+  const waypointDirtyRef = useRef(false);
 
   // Use a generation counter to discard stale async routing responses
   const routingGen = useRef(0);
@@ -571,8 +576,8 @@ export default function RouteBuilder() {
 
   const handleAddWaypoint = (result: { placeName: string; lng: number; lat: number }) => {
     const tempId = `client-wp-${Date.now()}`;
+    waypointDirtyRef.current = true;
     setWaypoints(prev => [...prev, { id: tempId, lat: result.lat, lng: result.lng, label: result.placeName }]);
-    if (isLiveRouteRef.current && !routeChangeMode) setRouteChangeMode(true);
   };
 
   // Fetch route alternatives whenever start/end, waypoints, or mode changes
@@ -584,9 +589,9 @@ export default function RouteBuilder() {
       }
       return; // Do NOT recalculate while the user is actively adding/editing waypoints
     }
-    // For live/completed routes, only re-route when the user is actively in change mode.
-    // This prevents cancel (which restores start/end) from triggering a fresh fetch.
-    if (routeId && (isCompleted || (isLiveRoute && !routeChangeMode))) return;
+    // For live/completed routes, only re-route in change mode OR when a waypoint change triggered this.
+    // waypointDirtyRef keeps the waypoint flow fully separate from the routeChangeMode / Save Route Changes UI.
+    if (routeId && (isCompleted || (isLiveRoute && !routeChangeMode && !waypointDirtyRef.current))) return;
     const gen = ++routingGen.current;
     const t = setTimeout(async () => {
       setIsRouting(true);
@@ -629,7 +634,13 @@ export default function RouteBuilder() {
           
           if (shouldSaveAfterRecalc.current) {
             shouldSaveAfterRecalc.current = false;
-            setTimeout(() => handleSave(false, true), 100);
+            waypointDirtyRef.current = false;
+            // polylineRef.current is already updated by this point (setRouteOptions above
+            // triggered a re-render which updated polylineRef.current before this runs).
+            setTimeout(async () => {
+              await handleSave(false, true);
+              if (isLiveRouteRef.current) refetchRoute();
+            }, 100);
           }
 
           // Fit map to the first (shortest) route
@@ -740,11 +751,11 @@ export default function RouteBuilder() {
     if (showAddWaypointRef.current) {
       const tempId = `client-wp-${Date.now()}`;
       const placeholder = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      waypointDirtyRef.current = true;
       setWaypoints(prev => [...prev, { id: tempId, lat, lng, label: placeholder }]);
       reverseGeocode(lat, lng, mapboxToken).then(label => {
         setWaypoints(ws => ws.map(w => w.id === tempId ? { ...w, label } : w));
       });
-      if (isLiveRouteRef.current && !routeChangeMode) setRouteChangeMode(true);
       return;
     }
     if (showAddStopRef.current) {
@@ -803,9 +814,9 @@ export default function RouteBuilder() {
         startLat: start.lat, startLng: start.lng,
         endLat: end.lat, endLng: end.lng,
         truckSpeedMph: 60,
-        polyline,
+        polyline: polylineRef.current,
         speedProfile,
-        waypoints: waypoints.map(w => ({ lat: w.lat, lng: w.lng, label: w.label })),
+        waypoints: waypointsRef.current.map(w => ({ lat: w.lat, lng: w.lng, label: w.label })),
         // customDurationS is sent only on create; for existing routes, use Update Speed button
         ...(!routeId && { customDurationS: useCustomDuration && customDurationMinutes > 0 ? customDurationMinutes * 60 : null }),
       };
@@ -1433,7 +1444,8 @@ export default function RouteBuilder() {
                   <button
                     onClick={() => {
                       if (showAddWaypoint) {
-                        if (isLiveRoute && !routeChangeMode) setRouteChangeMode(true);
+                        // Trigger recalc + auto-save only if waypoints actually changed
+                        if (waypointDirtyRef.current) shouldSaveAfterRecalc.current = true;
                         setShowAddWaypoint(false);
                         setMapClick(null);
                       } else {
@@ -1472,8 +1484,9 @@ export default function RouteBuilder() {
                           <span className="flex-1 text-sm font-medium truncate text-foreground">{wp.label}</span>
                           <button
                             onClick={() => {
+                              waypointDirtyRef.current = true;
+                              shouldSaveAfterRecalc.current = true;
                               setWaypoints(ws => ws.filter(w => w.id !== wp.id));
-                              if (isLiveRoute && !routeChangeMode) setRouteChangeMode(true);
                             }}
                             className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors shrink-0"
                           >
