@@ -12,7 +12,7 @@
 import { parentPort } from "worker_threads";
 import { eq, and, asc, inArray, sql } from "drizzle-orm";
 import { db, routesTable, simulationStatesTable, shareLinksTable, routeStopsTable } from "@workspace/db";
-import { positionAlongPolyline, haversineM } from "./geo";
+import { positionAlongPolyline, haversineM, distanceAlongPolylineAtPoint } from "./geo";
 
 if (!parentPort) throw new Error("simulation-worker must be run as a worker_thread");
 
@@ -38,6 +38,7 @@ interface StopEntry {
   distanceAlongPolylineM: number;
   durationS: number;
   name: string;
+  routeStopId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,16 +172,6 @@ function buildIntersectionStops(polyline: number[][], speedProfile: SpeedSegment
   return stops;
 }
 
-function distanceAlongPolylineToNearestVertex(polyline: number[][], targetLat: number, targetLng: number): number {
-  let minDist = Infinity, distAtMin = 0, cumDist = 0;
-  for (let i = 0; i < polyline.length; i++) {
-    const d = haversineM(polyline[i][1], polyline[i][0], targetLat, targetLng);
-    if (d < minDist) { minDist = d; distAtMin = cumDist; }
-    if (i < polyline.length - 1) cumDist += haversineM(polyline[i][1], polyline[i][0], polyline[i + 1][1], polyline[i + 1][0]);
-  }
-  return distAtMin;
-}
-
 // ---------------------------------------------------------------------------
 // Stop-aware position calculation
 // ---------------------------------------------------------------------------
@@ -188,6 +179,7 @@ interface PositionWithStop {
   lat: number; lng: number; bearing: number;
   distanceTraveledM: number; progressPercent: number;
   completed: boolean; atStopName: string | null;
+  atStopRouteStopId: number | null;
 }
 
 function computePositionWithStops(
@@ -201,18 +193,22 @@ function computePositionWithStops(
     const realLegTimeS = timeForDistance(legDistM, trimmedProfile, fallbackSpeedMph) / speedMultiplier;
     if (remainingS < realLegTimeS) {
       const additionalDistM = computeDistanceWithSpeedProfile(remainingS * speedMultiplier, trimmedProfile, fallbackSpeedMph);
-      return { ...positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM), atStopName: null };
+      return { ...positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM), atStopName: null, atStopRouteStopId: null };
     }
     remainingS -= realLegTimeS;
     travelDistConsumedM = stop.distanceAlongPolylineM;
     if (remainingS < stop.durationS) {
-      return { ...positionAlongPolyline(polyline, stop.distanceAlongPolylineM), atStopName: stop.name };
+      return {
+        ...positionAlongPolyline(polyline, stop.distanceAlongPolylineM),
+        atStopName: stop.name,
+        atStopRouteStopId: stop.routeStopId ?? null,
+      };
     }
     remainingS -= stop.durationS;
   }
   const trimmedProfile = trimSpeedProfile(speedProfile, travelDistConsumedM);
   const additionalDistM = computeDistanceWithSpeedProfile(remainingS * speedMultiplier, trimmedProfile, fallbackSpeedMph);
-  return { ...positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM), atStopName: null };
+  return { ...positionAlongPolyline(polyline, travelDistConsumedM + additionalDistM), atStopName: null, atStopRouteStopId: null };
 }
 
 // Inverse of computePositionWithStops: given a distance along the polyline,
@@ -283,17 +279,30 @@ async function warmRouteCache(routeId: number, truckSpeedMph: number): Promise<v
   const polyline = (fullRoute?.polyline as number[][]) || [];
   const speedProfile = scaleSpeedProfile((fullRoute?.speedProfile as SpeedSegment[] | null) || [], truckSpeedMph);
 
-  const [dbStops, shareLinks] = await Promise.all([
+  const [dbStops, shareLinks, simStates] = await Promise.all([
     db.select().from(routeStopsTable).where(eq(routeStopsTable.routeId, routeId)).orderBy(asc(routeStopsTable.sortOrder)),
     db.select().from(shareLinksTable).where(and(eq(shareLinksTable.routeId, routeId), eq(shareLinksTable.active, true))),
+    db.select({ distanceTraveledM: simulationStatesTable.distanceTraveledM })
+      .from(simulationStatesTable).where(eq(simulationStatesTable.routeId, routeId)).limit(1),
   ]);
 
+  const truckDistHint = Math.max(
+    lastKnownDistM.get(routeId) ?? 0,
+    simStates[0]?.distanceTraveledM ?? 0,
+  );
+
   const realStops: StopEntry[] = dbStops.map(s => ({
-    distanceAlongPolylineM: distanceAlongPolylineToNearestVertex(polyline, s.lat, s.lng),
-    durationS: s.durationMinutes * 60, name: s.name,
+    distanceAlongPolylineM: distanceAlongPolylineAtPoint(polyline, s.lat, s.lng),
+    durationS: s.durationMinutes * 60,
+    name: s.name,
+    routeStopId: s.id,
   }));
-  const sortedStops = [...realStops, ...buildIntersectionStops(polyline, speedProfile, truckSpeedMph, 0)]
+  let sortedStops = [...realStops, ...buildIntersectionStops(polyline, speedProfile, truckSpeedMph, truckDistHint)]
     .sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
+
+  if (truckDistHint > 0) {
+    sortedStops = filterPassedStops(sortedStops, truckDistHint);
+  }
 
   routeCache.set(routeId, { speedProfile, sortedStops, shareTokens: shareLinks.map(sl => sl.token), polyline, lastAccessedTick: tickCount });
 }
@@ -323,7 +332,8 @@ async function bulkCompleteRoutes(completions: Array<{ routeId: number; elapsedM
     db.execute(sql`
       UPDATE simulation_states AS s
       SET effective_elapsed_ms = v.elapsed, distance_traveled_m = v.dist,
-          progress_percent = v.prog, started_at = NULL, paused_at = NULL, updated_at = NOW()
+          progress_percent = v.prog, started_at = NULL, paused_at = NULL,
+          at_stop_route_stop_id = NULL, stop_arrived_at = NULL, updated_at = NOW()
       FROM (VALUES ${sql.join(simValues, sql`, `)}) AS v(route_id, elapsed, dist, prog)
       WHERE s.route_id = v.route_id
     `),
@@ -409,6 +419,12 @@ async function tick() {
           startedAt: new Date(nowMs),
           distanceTraveledM: resumeDistM,
           progressPercent: resumeAlong.progressPercent,
+          atStopRouteStopId: currentPos.atStopRouteStopId,
+          stopArrivedAt: currentPos.atStopRouteStopId
+            ? (currentPos.atStopRouteStopId === simState.atStopRouteStopId && simState.stopArrivedAt
+              ? simState.stopArrivedAt
+              : new Date(nowMs))
+            : null,
         })
         .where(eq(simulationStatesTable.routeId, route.id));
       lastKnownDistM.set(route.id, resumeDistM);
@@ -423,18 +439,42 @@ async function tick() {
 
     // Never snap back to a stop that is behind the furthest distance reached this session.
     const knownDistM = lastKnownDistM.get(route.id);
-    if (knownDistM != null && pos.atStopName) {
-      const stopEntry = cache.sortedStops.find(s => s.name === pos.atStopName);
+    if (knownDistM != null && pos.atStopRouteStopId) {
+      const stopEntry = cache.sortedStops.find(s => s.routeStopId === pos.atStopRouteStopId);
       if (stopEntry && stopEntry.distanceAlongPolylineM < knownDistM - PASSED_STOP_EPS_M) {
-        pos = { ...positionAlongPolyline(polyline, knownDistM), atStopName: null };
+        pos = { ...positionAlongPolyline(polyline, knownDistM), atStopName: null, atStopRouteStopId: null };
       }
     }
     if (knownDistM != null && pos.distanceTraveledM < knownDistM - PASSED_STOP_EPS_M) {
-      pos = { ...positionAlongPolyline(polyline, knownDistM), atStopName: null };
+      pos = { ...positionAlongPolyline(polyline, knownDistM), atStopName: null, atStopRouteStopId: null };
     }
     lastKnownDistM.set(route.id, Math.max(knownDistM ?? 0, pos.distanceTraveledM));
 
     const isAtAnyStop = pos.atStopName != null;
+    const isAtUserStop = pos.atStopRouteStopId != null;
+
+    // Persist dwell start / clear so countdown survives page refresh
+    let stopDwellRemainingS: number | null = null;
+    let snapshotAtStopRouteStopId: number | null = null;
+    if (isAtUserStop) {
+      const stopEntry = cache.sortedStops.find(s => s.routeStopId === pos.atStopRouteStopId);
+      let arrivedMs = simState.stopArrivedAt?.getTime() ?? null;
+      if (pos.atStopRouteStopId !== simState.atStopRouteStopId) {
+        arrivedMs = nowMs;
+        await db.update(simulationStatesTable)
+          .set({ atStopRouteStopId: pos.atStopRouteStopId, stopArrivedAt: new Date(nowMs) })
+          .where(eq(simulationStatesTable.routeId, route.id));
+      }
+      if (stopEntry && arrivedMs != null) {
+        snapshotAtStopRouteStopId = pos.atStopRouteStopId;
+        stopDwellRemainingS = Math.max(0, Math.round(stopEntry.durationS - (nowMs - arrivedMs) / 1000));
+      }
+    } else if (simState.atStopRouteStopId != null) {
+      await db.update(simulationStatesTable)
+        .set({ atStopRouteStopId: null, stopArrivedAt: null })
+        .where(eq(simulationStatesTable.routeId, route.id));
+    }
+
     const wasAtStop = wasAtStopMap.get(route.id) ?? false;
     if (!isAtAnyStop && wasAtStop) lastStopExitSMap.set(route.id, totalElapsedS);
     wasAtStopMap.set(route.id, isAtAnyStop);
@@ -486,7 +526,10 @@ async function tick() {
     const snapshot = {
       type: "snapshot", routeId: route.id, timestamp: new Date().toISOString(),
       status: trulyCompleted ? "completed" : route.status === "paused" ? "paused" : isAtAnyStop ? "at_stop" : "in_progress",
-      atStopName: pos.atStopName || null, distanceTraveledM: pos.distanceTraveledM,
+      atStopName: pos.atStopName || null,
+      atStopRouteStopId: snapshotAtStopRouteStopId,
+      stopDwellRemainingS,
+      distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent, lat: displayLat, lng: displayLng,
       bearing: pos.bearing, speedMph: currentSpeedMph,
     };

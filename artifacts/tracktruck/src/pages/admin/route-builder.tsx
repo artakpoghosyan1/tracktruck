@@ -134,23 +134,24 @@ const AnimatedTruckMarker = memo(({ snapshot }: {
 
 AnimatedTruckMarker.displayName = 'AnimatedTruckMarker';
 
-function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, atStopName, countdownSec }: {
+function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, atStopRouteStopId, countdownSec }: {
   stop: Stop; index: number;
   onRemove: (id: string) => void;
   onChangeName: (id: string, val: string) => void;
   onChangeDuration: (id: string, val: number) => void;
-  atStopName: string | null;
+  atStopRouteStopId: number | null;
   countdownSec: number | null;
 }) {
+  const isCurrentStop = stop.dbId != null && stop.dbId === atStopRouteStopId;
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 bg-muted/40 border border-border/60 rounded-xl p-3 group transition-all ${atStopName === stop.name ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : ''}`}>
+    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 bg-muted/40 border border-border/60 rounded-xl p-3 group transition-all ${isCurrentStop ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : ''}`}>
       <div className="flex gap-2 items-center">
         <div {...attributes} {...listeners} className="cursor-grab p-1 text-muted-foreground hover:text-foreground shrink-0">
           <GripVertical className="w-4 h-4" />
         </div>
-        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${atStopName === stop.name ? 'border-amber-500 text-amber-500 animate-pulse' : 'border-primary text-primary'}`}>
+        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-500 text-amber-500 animate-pulse' : 'border-primary text-primary'}`}>
           {index + 1}
         </div>
         <div className="flex-1 min-w-0 space-y-1">
@@ -181,7 +182,7 @@ function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuratio
         </button>
       </div>
 
-      {atStopName === stop.name && countdownSec !== null && (
+      {isCurrentStop && countdownSec !== null && (
         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-amber-500/10 rounded-lg border border-amber-500/30 animate-in slide-in-from-top-1">
           <Clock className="w-3 h-3 text-amber-600 animate-spin-slow" />
           <span className="text-xs font-bold text-amber-800 tabular-nums">
@@ -220,41 +221,28 @@ export default function RouteBuilder() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Live truck position for in-progress routes
-  const [liveSnapshot, setLiveSnapshot] = useState<{ lat: number; lng: number; bearing: number; speedMph: number; atStopName: string | null } | null>(null);
+  const [liveSnapshot, setLiveSnapshot] = useState<{
+    lat: number; lng: number; bearing: number; speedMph: number;
+    atStopRouteStopId: number | null;
+    stopDwellRemainingS: number | null;
+  } | null>(null);
 
-  // Stop countdown: track when truck arrived at current stop
-  const [stopArrivalTime, setStopArrivalTime] = useState<number | null>(null);
   const [countdownSec, setCountdownSec] = useState<number | null>(null);
-  const prevStopNameRef = useRef<string | null>(null);
 
-  const atStopName = liveSnapshot?.atStopName ?? null;
+  const atStopRouteStopId = liveSnapshot?.atStopRouteStopId ?? null;
+  const serverDwellRemainingS = liveSnapshot?.stopDwellRemainingS ?? null;
 
-  // Track stop arrivals and start countdown
+  // Sync countdown to authoritative server value on each WS tick
   useEffect(() => {
-    const currentStop = atStopName;
-    if (currentStop && currentStop !== prevStopNameRef.current) {
-      setStopArrivalTime(Date.now());
-    } else if (!currentStop) {
-      setStopArrivalTime(null);
-      setCountdownSec(null);
-    }
-    prevStopNameRef.current = currentStop;
-  }, [atStopName]);
+    setCountdownSec(serverDwellRemainingS);
+  }, [serverDwellRemainingS, atStopRouteStopId]);
 
-  // Countdown ticker
+  // Tick locally between 2s WS updates for smooth 1s display
   useEffect(() => {
-    if (!stopArrivalTime || !atStopName) return;
-    const stopData = stops.find(s => s.name === atStopName);
-    const totalSec = (stopData?.durationMinutes ?? 5) * 60;
-    const tick = () => {
-      const elapsed = (Date.now() - stopArrivalTime) / 1000;
-      const remaining = Math.max(0, Math.round(totalSec - elapsed));
-      setCountdownSec(remaining);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
+    if (atStopRouteStopId === null) return;
+    const id = setInterval(() => setCountdownSec(s => s !== null ? Math.max(0, s - 1) : null), 1000);
     return () => clearInterval(id);
-  }, [stopArrivalTime, atStopName, stops]);
+  }, [atStopRouteStopId]);
 
 
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
@@ -514,7 +502,8 @@ export default function RouteBuilder() {
               lng: data.snapshot.lng,
               bearing: data.snapshot.bearing ?? 0,
               speedMph: data.snapshot.speedMph ?? 0,
-              atStopName: data.snapshot.atStopName || null,
+              atStopRouteStopId: data.snapshot.atStopRouteStopId ?? null,
+              stopDwellRemainingS: data.snapshot.stopDwellRemainingS ?? null,
             });
           }
         })
@@ -549,7 +538,8 @@ export default function RouteBuilder() {
               lng: data.lng,
               bearing: data.bearing ?? 0,
               speedMph: data.speedMph ?? 0,
-              atStopName: data.atStopName || null,
+              atStopRouteStopId: data.atStopRouteStopId ?? null,
+              stopDwellRemainingS: data.stopDwellRemainingS ?? null,
             }));
           } else if (data.type === 'snapshot' && data.speedMph !== undefined) {
             // Partial update (e.g. pause) — update speed without moving the marker
@@ -1716,8 +1706,8 @@ export default function RouteBuilder() {
                           key={stop.id}
                           stop={stop}
                           index={i}
-                          atStopName={atStopName}
-                          countdownSec={atStopName === stop.name ? countdownSec : null}
+                          atStopRouteStopId={atStopRouteStopId}
+                          countdownSec={stop.dbId != null && stop.dbId === atStopRouteStopId ? countdownSec : null}
                           onRemove={async (id) => {
                             if (durationSaveTimerRef.current) {
                               clearTimeout(durationSaveTimerRef.current);

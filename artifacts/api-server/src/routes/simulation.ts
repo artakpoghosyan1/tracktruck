@@ -79,7 +79,11 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     });
   } else {
     await db.update(simulationStatesTable)
-      .set({ effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0, startedAt: null, pausedAt: null, updatedAt: new Date() })
+      .set({
+        effectiveElapsedMs: 0, distanceTraveledM: 0, progressPercent: 0,
+        atStopRouteStopId: null, stopArrivedAt: null,
+        startedAt: null, pausedAt: null, updatedAt: new Date(),
+      })
       .where(eq(simulationStatesTable.routeId, routeId));
   }
 
@@ -142,6 +146,8 @@ router.post("/routes/:id/start", validate({ params: StartRouteParams }), async (
           effectiveElapsedMs: 0,
           distanceTraveledM: 0,
           progressPercent: 0,
+          atStopRouteStopId: null,
+          stopArrivedAt: null,
         }),
       })
       .where(eq(simulationStatesTable.routeId, routeId));

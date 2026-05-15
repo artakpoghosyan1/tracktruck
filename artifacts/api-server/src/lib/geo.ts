@@ -115,3 +115,37 @@ export function totalPolylineDistance(coords: number[][]): number {
   }
   return total;
 }
+
+/** Cumulative polyline distance (meters) at the closest point to (lat, lng) on the route. */
+export function distanceAlongPolylineAtPoint(
+  polyline: number[][],
+  targetLat: number,
+  targetLng: number,
+): number {
+  if (polyline.length === 0) return 0;
+  if (polyline.length === 1) return 0;
+
+  let bestDistSq = Infinity;
+  let bestAlongM = 0;
+  let cumDist = 0;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const ax = polyline[i][0], ay = polyline[i][1];
+    const bx = polyline[i + 1][0], by = polyline[i + 1][1];
+    const segLen = haversineM(ay, ax, by, bx);
+    const abx = bx - ax, aby = by - ay;
+    const lenSq = abx * abx + aby * aby;
+    const t = lenSq > 0
+      ? Math.max(0, Math.min(1, ((targetLng - ax) * abx + (targetLat - ay) * aby) / lenSq))
+      : 0;
+    const snapLng = ax + t * abx;
+    const snapLat = ay + t * aby;
+    const distSq = (targetLng - snapLng) ** 2 + (targetLat - snapLat) ** 2;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestAlongM = cumDist + segLen * t;
+    }
+    cumDist += segLen;
+  }
+  return bestAlongM;
+}

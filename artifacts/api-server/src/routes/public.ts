@@ -39,7 +39,11 @@ async function getRouteByToken(token: string) {
   return { route, shareLink };
 }
 
-function computeSnapshot(route: typeof routesTable.$inferSelect, simState: typeof simulationStatesTable.$inferSelect | undefined) {
+function computeSnapshot(
+  route: typeof routesTable.$inferSelect,
+  simState: typeof simulationStatesTable.$inferSelect | undefined,
+  stops: { id: number; name: string; durationMinutes: number }[] = [],
+) {
   if (!simState) return null;
 
   const polyline = (route.polyline as number[][]) || [];
@@ -55,15 +59,36 @@ function computeSnapshot(route: typeof routesTable.$inferSelect, simState: typeo
     : (totalElapsedMs / 1000) * speedMs;
   const pos = positionAlongPolyline(polyline, distanceTraveledM);
 
+  let atStopName: string | null = null;
+  let atStopRouteStopId: number | null = null;
+  let stopDwellRemainingS: number | null = null;
+
+  if (simState.atStopRouteStopId && simState.stopArrivedAt) {
+    const stop = stops.find(s => s.id === simState.atStopRouteStopId);
+    if (stop) {
+      atStopRouteStopId = stop.id;
+      atStopName = stop.name;
+      const dwellElapsedS = (Date.now() - simState.stopArrivedAt.getTime()) / 1000;
+      stopDwellRemainingS = Math.max(0, Math.round(stop.durationMinutes * 60 - dwellElapsedS));
+    }
+  }
+
+  const status = stopDwellRemainingS != null && route.status === "in_progress"
+    ? "at_stop"
+    : pos.completed ? "completed" : route.status;
+
   return {
     routeId: route.id,
     timestamp: new Date().toISOString(),
-    status: pos.completed ? "completed" : route.status,
+    status,
     distanceTraveledM: distanceTraveledM,
     progressPercent: simState.progressPercent || pos.progressPercent,
     lat: pos.lat || null,
     lng: pos.lng || null,
     bearing: pos.bearing ?? null,
+    atStopName,
+    atStopRouteStopId,
+    stopDwellRemainingS,
   };
 }
 
@@ -84,7 +109,7 @@ router.get("/public/track/:token", validate({ params: GetPublicTrackParams }), a
   ]);
 
   const simState = simStates[0];
-  const snapshot = computeSnapshot(route, simState);
+  const snapshot = computeSnapshot(route, simState, stops);
 
   res.json({
     routeId: route.id,
@@ -96,6 +121,7 @@ router.get("/public/track/:token", validate({ params: GetPublicTrackParams }), a
     endLng: route.endLng,
     polyline: (route.polyline as number[][]) || [],
     stops: stops.map((s) => ({
+      id: s.id,
       name: s.name,
       lat: s.lat,
       lng: s.lng,
@@ -120,12 +146,13 @@ router.get("/public/track/:token/state", validate({ params: GetPublicTrackStateP
 
   const { route } = result;
 
-  const [simStates] = await Promise.all([
+  const [stops, simStates] = await Promise.all([
+    db.select().from(routeStopsTable).where(eq(routeStopsTable.routeId, route.id)).orderBy(routeStopsTable.sortOrder),
     db.select().from(simulationStatesTable).where(eq(simulationStatesTable.routeId, route.id)).limit(1),
   ]);
 
   const simState = simStates[0];
-  const snapshot = computeSnapshot(route, simState);
+  const snapshot = computeSnapshot(route, simState, stops);
 
   if (!snapshot) {
     res.json({

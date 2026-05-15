@@ -339,8 +339,6 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     .where(eq(routesTable.id, id))
     .returning();
 
-  invalidateRouteCache(updated.id);
-
   // If route is activated, check if the start/end map points explicitly changed to reset the simulation completely
   if (["ready", "in_progress", "paused"].includes(updated.status)) {
     const startEndGeometryChanged =
@@ -356,11 +354,19 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
           effectiveElapsedMs: 0,
           distanceTraveledM: 0,
           progressPercent: 0,
+          atStopRouteStopId: null,
+          stopArrivedAt: null,
           startedAt: updated.status === "in_progress" ? new Date() : null,
           pausedAt: updated.status === "paused" ? new Date() : null,
           updatedAt: new Date(),
         })
         .where(eq(simulationStatesTable.routeId, updated.id));
+      invalidateRouteCache(updated.id);
+    } else if (polylineChanged && updated.status === "in_progress") {
+      // Waypoint / polyline edits: keep truck moving from its current position on the new path
+      resumeRouteFromCurrentPosition(updated.id);
+    } else {
+      invalidateRouteCache(updated.id);
     }
 
     // Notify all viewers that the route has changed so they refetch
@@ -374,6 +380,8 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     for (const sl of activeLinks) {
       broadcastToToken(sl.token, routeUpdatedMsg);
     }
+  } else {
+    invalidateRouteCache(updated.id);
   }
 
   // Re-fetch the active share link so the response reflects the real state
@@ -554,7 +562,11 @@ router.post("/routes/:id/stops", validate({ params: CreateStopParams, body: Crea
     .values({ routeId, name, lat, lng, durationMinutes, sortOrder })
     .returning();
 
-  invalidateRouteCache(routeId);
+  if (route.status === "in_progress") {
+    resumeRouteFromCurrentPosition(routeId);
+  } else {
+    invalidateRouteCache(routeId);
+  }
 
   // Notify live viewers so position recalculates with the new stop
   if (["in_progress", "paused"].includes(route.status)) {
@@ -631,7 +643,8 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
   });
 
   const stopWasRemoved = (stops?.length ?? 0) < oldCount;
-  if (stopWasRemoved && route.status === "in_progress") {
+  const stopWasAdded = (stops?.length ?? 0) > oldCount;
+  if ((stopWasRemoved || stopWasAdded) && route.status === "in_progress") {
     resumeRouteFromCurrentPosition(routeId);
   } else {
     invalidateRouteCache(routeId);

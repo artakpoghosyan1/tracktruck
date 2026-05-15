@@ -13,6 +13,8 @@ interface SnapshotData {
   timestamp: string;
   status: string;
   atStopName: string | null;
+  atStopRouteStopId?: number | null;
+  stopDwellRemainingS?: number | null;
   distanceTraveledM: number;
   progressPercent: number;
   lat: number | null;
@@ -251,7 +253,9 @@ export default function PublicTracking() {
               </h3>
               <div className="space-y-2">
                 {route.stops.map((stop, i) => {
-                  const isCurrentStop = activeSnapshot?.atStopName === stop.name;
+                  const isCurrentStop = (activeSnapshot as SnapshotData | null)?.atStopRouteStopId != null
+                    ? (activeSnapshot as SnapshotData).atStopRouteStopId === (stop as any).id
+                    : activeSnapshot?.atStopName === stop.name;
                   return (
                     <div key={i} className={`flex items-center gap-3 p-2.5 rounded-xl transition-colors ${isCurrentStop ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
                       <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-400 bg-amber-400 text-white' : 'border-primary/30 bg-white text-primary'}`}>
