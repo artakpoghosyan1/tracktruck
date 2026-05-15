@@ -491,51 +491,13 @@ router.patch("/routes/:id/speed", async (req, res) => {
     .where(eq(routesTable.id, id))
     .returning();
 
-  invalidateRouteCache(updated.id);
-
-  // When speed/duration settings change on a LIVE route: recalculate
-  // effectiveElapsedMs so the truck stays at its current position instead of
-  // jumping.  The simulation engine computes:
-  //   virtualElapsedS = totalElapsedS × speedMultiplier
-  // We need:  oldTotal × oldMult  =  newTotal × newMult
-  //   →  newTotal = oldTotal × (oldMult / newMult)
-  if (["in_progress", "paused"].includes(updated.status)) {
-    const [simState] = await db.select().from(simulationStatesTable)
-      .where(eq(simulationStatesTable.routeId, id)).limit(1);
-
-    if (simState) {
-      // Calculate current total elapsed milliseconds
-      let totalElapsedMs = simState.effectiveElapsedMs ?? 0;
-      if (updated.status === "in_progress" && simState.startedAt) {
-        totalElapsedMs += Date.now() - simState.startedAt.getTime();
-      }
-
-      // Multiplier formula MUST match the worker: speedMultiplier = estimatedDurationS / customDurationS
-      // Using naturalTimeS here would diverge from the worker and cause position jumps on toggle.
-      const oldEnabled = existing.customDurationEnabled;
-      const oldDuration = existing.customDurationS;
-      const oldMult = (oldEnabled && oldDuration && oldDuration > 0 && existing.estimatedDurationS > 0)
-        ? existing.estimatedDurationS / oldDuration
-        : 1.0;
-
-      const newEnabled = updated.customDurationEnabled;
-      const newDuration = updated.customDurationS;
-      const newMult = (newEnabled && newDuration && newDuration > 0 && updated.estimatedDurationS > 0)
-        ? updated.estimatedDurationS / newDuration
-        : 1.0;
-
-      // Adjust elapsed time so truck stays at the same position
-      const adjustedMs = Math.round(totalElapsedMs * (oldMult / newMult));
-
-      await db.update(simulationStatesTable)
-        .set({
-          effectiveElapsedMs: adjustedMs,
-          startedAt: updated.status === "in_progress" ? new Date() : simState.startedAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(simulationStatesTable.routeId, id));
-    }
-  }
+  // Pass old/new multipliers so the worker can compute the exact current position
+  // from real-time elapsed (not stale DB distanceTraveledM) and convert it correctly.
+  const oldMult = (existing.customDurationEnabled && existing.customDurationS && existing.customDurationS > 0 && existing.estimatedDurationS > 0)
+    ? existing.estimatedDurationS / existing.customDurationS : 1.0;
+  const newMult = (updated.customDurationEnabled && updated.customDurationS && updated.customDurationS > 0 && updated.estimatedDurationS > 0)
+    ? updated.estimatedDurationS / updated.customDurationS : 1.0;
+  resumeRouteFromCurrentPosition(updated.id, oldMult, newMult, { invalidateCache: false });
 
   // Always notify viewers so public pages pick up showSpeedPublic changes
   const routeUpdatedMsg = { type: "route_updated", routeId: updated.id };
@@ -649,6 +611,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
     .from(routeStopsTable)
     .where(eq(routeStopsTable.routeId, routeId));
 
+  let insertedStops: typeof routeStopsTable.$inferSelect[] = [];
   await db.transaction(async (tx) => {
     // Delete all existing stops
     await tx.delete(routeStopsTable).where(eq(routeStopsTable.routeId, routeId));
@@ -660,10 +623,10 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
         name: s.name,
         lat: s.lat,
         lng: s.lng,
-        durationMinutes: s.durationMinutes || 5,
+        durationMinutes: Math.max(1, s.durationMinutes ?? 5),
         sortOrder: s.sortOrder ?? i,
       }));
-      await tx.insert(routeStopsTable).values(values);
+      insertedStops = await tx.insert(routeStopsTable).values(values).returning();
     }
   });
 
@@ -686,7 +649,18 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
     }
   }
 
-  res.status(200).json({ success: true });
+  res.status(200).json({
+    success: true,
+    stops: insertedStops.map((s) => ({
+      id: s.id,
+      routeId: s.routeId,
+      name: s.name,
+      lat: s.lat,
+      lng: s.lng,
+      durationMinutes: s.durationMinutes,
+      sortOrder: s.sortOrder,
+    })),
+  });
 });
 
 router.put(

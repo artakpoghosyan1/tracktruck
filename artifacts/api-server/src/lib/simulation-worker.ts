@@ -237,6 +237,13 @@ function timeToReachDistanceM(
   return elapsed;
 }
 
+/** Stops at or slightly before the truck are kept; strictly passed stops are removed. */
+const PASSED_STOP_EPS_M = 5;
+
+function filterPassedStops(stops: StopEntry[], resumeDistM: number): StopEntry[] {
+  return stops.filter(s => s.distanceAlongPolylineM >= resumeDistM - PASSED_STOP_EPS_M);
+}
+
 // ---------------------------------------------------------------------------
 // Route cache
 // ---------------------------------------------------------------------------
@@ -244,7 +251,9 @@ const COMPLETION_GRACE_S = 5;
 const completionGraceMap = new Map<number, number>();
 const wasAtStopMap = new Map<number, boolean>();
 const lastStopExitSMap = new Map<number, number>();
+const lastKnownDistM = new Map<number, number>();
 const resumeFromPositionSet = new Set<number>();
+const resumeMetadataMap = new Map<number, { oldMult: number; newMult: number }>();
 let tickCount = 0;
 
 interface CachedRoute {
@@ -258,6 +267,9 @@ const routeCache = new Map<number, CachedRoute>();
 
 function invalidateLocalCache(routeId: number) {
   routeCache.delete(routeId);
+  lastStopExitSMap.delete(routeId);
+  wasAtStopMap.delete(routeId);
+  resumeMetadataMap.delete(routeId);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,13 +378,40 @@ async function tick() {
     let startedAtMs = simState.startedAt.getTime();
     if (resumeFromPositionSet.has(route.id)) {
       resumeFromPositionSet.delete(route.id);
-      const resumeDistM = simState.distanceTraveledM ?? 0;
-      const adjustedElapsedS = timeToReachDistanceM(resumeDistM, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier);
+      const meta = resumeMetadataMap.get(route.id);
+      resumeMetadataMap.delete(route.id);
+
+      const currentWallMs = Math.max(0, nowMs - startedAtMs);
+      const currentTotalElapsedS = (effectiveElapsedMs + currentWallMs) / 1000;
+      const multForCurrentPos = meta?.oldMult ?? speedMultiplier;
+      const currentPos = computePositionWithStops(
+        currentTotalElapsedS, cache.polyline, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, multForCurrentPos,
+      );
+      const resumeDistM = Math.max(
+        currentPos.distanceTraveledM,
+        simState.distanceTraveledM ?? 0,
+        lastKnownDistM.get(route.id) ?? 0,
+      );
+
+      // Drop stops the truck has already passed so recalibration does not snap back to them.
+      cache.sortedStops = filterPassedStops(cache.sortedStops, resumeDistM);
+
+      const adjustedElapsedS = timeToReachDistanceM(
+        resumeDistM, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier,
+      );
       effectiveElapsedMs = adjustedElapsedS * 1000;
       startedAtMs = nowMs;
+
+      const resumeAlong = positionAlongPolyline(cache.polyline, resumeDistM);
       await db.update(simulationStatesTable)
-        .set({ effectiveElapsedMs, startedAt: new Date(nowMs) })
+        .set({
+          effectiveElapsedMs,
+          startedAt: new Date(nowMs),
+          distanceTraveledM: resumeDistM,
+          progressPercent: resumeAlong.progressPercent,
+        })
         .where(eq(simulationStatesTable.routeId, route.id));
+      lastKnownDistM.set(route.id, resumeDistM);
     }
 
     const wallElapsedMs = Math.max(0, nowMs - startedAtMs);
@@ -380,7 +419,20 @@ async function tick() {
     const totalElapsedS = totalElapsedMs / 1000;
     const polyline = cache.polyline;
 
-    const pos = computePositionWithStops(totalElapsedS, polyline, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier);
+    let pos = computePositionWithStops(totalElapsedS, polyline, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier);
+
+    // Never snap back to a stop that is behind the furthest distance reached this session.
+    const knownDistM = lastKnownDistM.get(route.id);
+    if (knownDistM != null && pos.atStopName) {
+      const stopEntry = cache.sortedStops.find(s => s.name === pos.atStopName);
+      if (stopEntry && stopEntry.distanceAlongPolylineM < knownDistM - PASSED_STOP_EPS_M) {
+        pos = { ...positionAlongPolyline(polyline, knownDistM), atStopName: null };
+      }
+    }
+    if (knownDistM != null && pos.distanceTraveledM < knownDistM - PASSED_STOP_EPS_M) {
+      pos = { ...positionAlongPolyline(polyline, knownDistM), atStopName: null };
+    }
+    lastKnownDistM.set(route.id, Math.max(knownDistM ?? 0, pos.distanceTraveledM));
 
     const isAtAnyStop = pos.atStopName != null;
     const wasAtStop = wasAtStopMap.get(route.id) ?? false;
@@ -418,7 +470,7 @@ async function tick() {
     const effectiveRampUpS = RAMP_UP_S * Math.max(0.25, effectiveSpeedMph / 60);
     const lastStopExitS = lastStopExitSMap.get(route.id) ?? -Infinity;
     const timeSinceStopExitS = isAtAnyStop ? 0 : totalElapsedS - lastStopExitS;
-    const stopRampFactor = timeSinceStopExitS < effectiveRampUpS ? timeSinceStopExitS / effectiveRampUpS : 1.0;
+    const stopRampFactor = (timeSinceStopExitS >= 0 && timeSinceStopExitS < effectiveRampUpS) ? timeSinceStopExitS / effectiveRampUpS : 1.0;
     const rampFactor = isAtAnyStop ? 0 : stopRampFactor;
 
     const displayBaseSpeedMph = speedMultiplier < 1 ? route.truckSpeedMph * speedMultiplier : baseSpeedMph;
@@ -445,6 +497,7 @@ async function tick() {
       completionGraceMap.delete(route.id);
       wasAtStopMap.delete(route.id);
       lastStopExitSMap.delete(route.id);
+      lastKnownDistM.delete(route.id);
       resumeFromPositionSet.delete(route.id);
       invalidateLocalCache(route.id);
       completions.push({ routeId: route.id, elapsedMs: totalElapsedMs, distM: pos.distanceTraveledM, prog: pos.progressPercent });
@@ -476,11 +529,14 @@ function evictStaleCache() {
 // ---------------------------------------------------------------------------
 // Listen for messages from the main thread
 // ---------------------------------------------------------------------------
-parentPort.on("message", (msg: { type: string; routeId?: number }) => {
+parentPort.on("message", (msg: { type: string; routeId?: number; oldMult?: number; newMult?: number }) => {
   if (msg.type === "invalidate_cache" && msg.routeId != null) {
     invalidateLocalCache(msg.routeId);
   } else if (msg.type === "resume_from_position" && msg.routeId != null) {
     resumeFromPositionSet.add(msg.routeId);
+    if (msg.oldMult != null && msg.newMult != null) {
+      resumeMetadataMap.set(msg.routeId, { oldMult: msg.oldMult, newMult: msg.newMult });
+    }
   }
 });
 

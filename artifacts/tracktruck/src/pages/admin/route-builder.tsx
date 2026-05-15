@@ -134,12 +134,11 @@ const AnimatedTruckMarker = memo(({ snapshot }: {
 
 AnimatedTruckMarker.displayName = 'AnimatedTruckMarker';
 
-function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, onBlurDuration, atStopName, countdownSec }: {
+function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuration, atStopName, countdownSec }: {
   stop: Stop; index: number;
   onRemove: (id: string) => void;
   onChangeName: (id: string, val: string) => void;
   onChangeDuration: (id: string, val: number) => void;
-  onBlurDuration: (id: string, val: number) => void;
   atStopName: string | null;
   countdownSec: number | null;
 }) {
@@ -168,7 +167,6 @@ function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuratio
               type="number"
               value={stop.durationMinutes}
               onChange={(e) => onChangeDuration(stop.id, Number(e.target.value))}
-              onBlur={(e) => onBlurDuration(stop.id, Number(e.target.value))}
               className="w-10 bg-transparent outline-none border-b border-dashed border-muted-foreground/40 text-center"
               min={1}
             />
@@ -449,10 +447,10 @@ export default function RouteBuilder() {
       setSelectedIdx(0);
     }
 
-    // Custom duration: always start unchecked — user opens it manually when needed
-    // But always populate the saved value so it's there when they check the box
-    if (existingRoute.customDurationS) {
-      setCustomDurationMinutes(Math.round(existingRoute.customDurationS / 60));
+    const er2 = existingRoute as any;
+    setUseCustomDuration(er2.customDurationEnabled ?? false);
+    if (er2.customDurationS) {
+      setCustomDurationMinutes(Math.round(er2.customDurationS / 60));
     }
     const er = existingRoute as any;
     setShowSpeedPublic(er.showSpeedPublic ?? true);
@@ -722,19 +720,6 @@ export default function RouteBuilder() {
     }
   };
 
-  const handleAddStop = async (result: { placeName: string; lng: number; lat: number }) => {
-    const tempId = `client-${Date.now()}`;
-    const snapped = snapToPolyline(result.lat, result.lng, polylineRef.current);
-    const placeholder = `${snapped.lat.toFixed(4)}, ${snapped.lng.toFixed(4)}`;
-
-    stopDirtyRef.current = true;
-    setStops(prev => [...prev, { id: tempId, name: placeholder, lat: snapped.lat, lng: snapped.lng, durationMinutes: 15 }]);
-
-    reverseGeocode(snapped.lat, snapped.lng, mapboxToken).then(label => {
-      setStops(s => s.map(x => x.id === tempId ? { ...x, name: label } : x));
-    });
-  };
-
   const showAddStopRef = useRef(showAddStop);
   showAddStopRef.current = showAddStop;
 
@@ -767,7 +752,7 @@ export default function RouteBuilder() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
         },
-        body: JSON.stringify({ ...stop, sortOrder }),
+        body: JSON.stringify({ ...stop, durationMinutes: Math.max(1, stop.durationMinutes), sortOrder }),
       });
       if (!res.ok) return null;
       const data = await res.json();
@@ -776,6 +761,98 @@ export default function RouteBuilder() {
       return null;
     }
   }, []);
+
+  type SavedStopRow = { id: number; name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number };
+
+  /** Bulk-replace stops and sync returned DB ids back into local state. */
+  const syncStopsToBackend = useCallback(async (nextStops: Stop[]): Promise<Stop[]> => {
+    const id = routeIdRef.current;
+    if (!id) return nextStops;
+    try {
+      const res = await fetch(`/api/routes/${id}/stops/bulk`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+        },
+        body: JSON.stringify({
+          stops: nextStops.map((s, i) => ({
+            name: s.name,
+            lat: s.lat,
+            lng: s.lng,
+            durationMinutes: Math.max(1, s.durationMinutes || 5),
+            sortOrder: i,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to save stops');
+      }
+      const data = await res.json() as { stops?: SavedStopRow[] };
+      if (!data.stops) return nextStops;
+      return nextStops.map((s, i) => {
+        const saved = data.stops![i];
+        if (!saved) return s;
+        return {
+          ...s,
+          dbId: saved.id,
+          id: String(saved.id),
+          durationMinutes: saved.durationMinutes,
+        };
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save stop settings';
+      toast({ title: 'Could not save stop', description: msg, variant: 'destructive' });
+      return nextStops;
+    }
+  }, [toast]);
+
+  const DURATION_SAVE_DEBOUNCE_MS = 600;
+  const durationSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleDebouncedStopsSave = useCallback(() => {
+    if (!routeIdRef.current) return;
+    if (durationSaveTimerRef.current) clearTimeout(durationSaveTimerRef.current);
+    durationSaveTimerRef.current = setTimeout(async () => {
+      durationSaveTimerRef.current = null;
+      const next = stopsRef.current.map(s => ({
+        ...s,
+        durationMinutes: Math.max(1, Number.isFinite(s.durationMinutes) && s.durationMinutes > 0 ? s.durationMinutes : 15),
+      }));
+      const synced = await syncStopsToBackend(next);
+      setStops(synced);
+    }, DURATION_SAVE_DEBOUNCE_MS);
+  }, [syncStopsToBackend]);
+
+  useEffect(() => () => {
+    if (durationSaveTimerRef.current) clearTimeout(durationSaveTimerRef.current);
+  }, []);
+
+  const handleAddStop = async (result: { placeName: string; lng: number; lat: number }) => {
+    const tempId = `client-${Date.now()}`;
+    const snapped = snapToPolyline(result.lat, result.lng, polylineRef.current);
+    const placeholder = `${snapped.lat.toFixed(4)}, ${snapped.lng.toFixed(4)}`;
+
+    stopDirtyRef.current = true;
+    const newStop: Stop = { id: tempId, name: placeholder, lat: snapped.lat, lng: snapped.lng, durationMinutes: 15 };
+    const nextStops = [...stopsRef.current, newStop];
+    setStops(nextStops);
+
+    if (routeIdRef.current) {
+      const dbId = await saveStopToDb(newStop, nextStops.length - 1);
+      if (dbId) {
+        setStops(s => s.map(x => x.id === tempId ? { ...x, dbId, id: String(dbId) } : x));
+      }
+    }
+
+    const { lat: stopLat, lng: stopLng } = snapped;
+    reverseGeocode(stopLat, stopLng, mapboxToken).then(label => {
+      setStops(s => s.map(x =>
+        Math.abs(x.lat - stopLat) < 1e-6 && Math.abs(x.lng - stopLng) < 1e-6 ? { ...x, name: label } : x,
+      ));
+    });
+  };
 
   const handleMapClick = useCallback(async (e: mapboxgl.MapMouseEvent) => {
     const { lng, lat } = e.lngLat;
@@ -795,10 +872,22 @@ export default function RouteBuilder() {
       const placeholder = `${snapped.lat.toFixed(4)}, ${snapped.lng.toFixed(4)}`;
 
       stopDirtyRef.current = true;
-      setStops(prev => [...prev, { id: tempId, name: placeholder, lat: snapped.lat, lng: snapped.lng, durationMinutes: 15 }]);
+      const newStop: Stop = { id: tempId, name: placeholder, lat: snapped.lat, lng: snapped.lng, durationMinutes: 15 };
+      const nextStops = [...stopsRef.current, newStop];
+      setStops(nextStops);
 
-      reverseGeocode(snapped.lat, snapped.lng, mapboxToken).then(label => {
-        setStops(s => s.map(x => x.id === tempId ? { ...x, name: label } : x));
+      if (routeIdRef.current) {
+        const dbId = await saveStopToDb(newStop, nextStops.length - 1);
+        if (dbId) {
+          setStops(s => s.map(x => x.id === tempId ? { ...x, dbId, id: String(dbId) } : x));
+        }
+      }
+
+      const { lat: stopLat, lng: stopLng } = snapped;
+      reverseGeocode(stopLat, stopLng, mapboxToken).then(label => {
+        setStops(s => s.map(x =>
+          Math.abs(x.lat - stopLat) < 1e-6 && Math.abs(x.lng - stopLng) < 1e-6 ? { ...x, name: label } : x,
+        ));
       });
       return;
     }
@@ -867,12 +956,28 @@ export default function RouteBuilder() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
         body: JSON.stringify({
-          stops: stopsRef.current.map((s, i) => ({ name: s.name, lat: s.lat, lng: s.lng, durationMinutes: s.durationMinutes, sortOrder: i }))
-        })
+          stops: stopsRef.current.map((s, i) => ({
+            name: s.name,
+            lat: s.lat,
+            lng: s.lng,
+            durationMinutes: Math.max(1, s.durationMinutes || 5),
+            sortOrder: i,
+          })),
+        }),
       });
       if (!bulkRes.ok) {
         const bd = await bulkRes.json().catch(()=>({}));
         throw new Error("Failed to save stops: " + (bd.message || bulkRes.statusText));
+      }
+      const bulkData = await bulkRes.json() as { stops?: SavedStopRow[] };
+      if (bulkData.stops?.length) {
+        const synced = stopsRef.current.map((s, i) => {
+          const saved = bulkData.stops![i];
+          if (!saved) return s;
+          return { ...s, dbId: saved.id, id: String(saved.id), durationMinutes: saved.durationMinutes };
+        });
+        setStops(synced);
+        stopsRef.current = synced;
       }
       
       // Force React Query to wipe its cache so that refetchRoute pulls the newly inserted stops!
@@ -1183,7 +1288,7 @@ export default function RouteBuilder() {
 
                 <hr className="border-border/40" />
 
-                {/* Override duration checkbox */}
+                {/* Custom simulation time */}
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1191,9 +1296,10 @@ export default function RouteBuilder() {
                     onChange={(e) => setUseCustomDuration(e.target.checked)}
                     className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
                   />
-                  <span className="text-sm font-semibold text-foreground">
-                    Override simulation duration
-                  </span>
+                  <span className="text-sm font-semibold text-foreground">Custom simulation time</span>
+                  {(existingRoute as any)?.customDurationEnabled && (
+                    <span className="ml-auto text-xs font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Active</span>
+                  )}
                 </label>
 
                 {useCustomDuration && (
@@ -1243,8 +1349,6 @@ export default function RouteBuilder() {
                           throw new Error(err.message || 'Failed to update speed');
                         }
                         toast({ title: "Settings Updated", description: "Speed settings have been saved." });
-                        // Close the speed field after saving
-                        setUseCustomDuration(false);
                         await refetchRoute();
                       } catch (err: any) {
                         toast({ title: "Update failed", description: err?.message || "Failed to update", variant: "destructive" });
@@ -1614,15 +1718,16 @@ export default function RouteBuilder() {
                           index={i}
                           atStopName={atStopName}
                           countdownSec={atStopName === stop.name ? countdownSec : null}
-                          onRemove={(id) => {
+                          onRemove={async (id) => {
+                            if (durationSaveTimerRef.current) {
+                              clearTimeout(durationSaveTimerRef.current);
+                              durationSaveTimerRef.current = null;
+                            }
                             const newStops = stopsRef.current.filter(x => x.id !== id);
                             setStops(newStops);
                             if (routeId) {
-                              fetch(`/api/routes/${routeId}/stops/bulk`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
-                                body: JSON.stringify({ stops: newStops.map((s, i) => ({ name: s.name, lat: s.lat, lng: s.lng, durationMinutes: s.durationMinutes, sortOrder: i })) }),
-                              }).catch(() => {});
+                              const synced = await syncStopsToBackend(newStops);
+                              setStops(synced);
                             }
                           }}
                           onChangeName={(id, val) => setStops(s => s.map(x => x.id === id ? { ...x, name: val } : x))}
@@ -1631,16 +1736,7 @@ export default function RouteBuilder() {
                               if (x.id !== id) return x;
                               return { ...x, durationMinutes: val };
                             }));
-                          }}
-                          onBlurDuration={(id, val) => {
-                            const x = stops.find(s => s.id === id);
-                            if (x && routeId && x.dbId) {
-                              fetch(`/api/routes/${routeId}/stops/${x.dbId}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
-                                body: JSON.stringify({ durationMinutes: val }),
-                              }).catch(() => { });
-                            }
+                            scheduleDebouncedStopsSave();
                           }}
                         />
                       ))}
