@@ -7,7 +7,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   ArrowLeft, Save, Zap, Flag, GripVertical,
   Plus, Trash2, MapPin, X, Loader2, Play, Pause,
-  Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon, Menu
+  Pencil, AlertTriangle, Gauge, Settings, Copy, CheckCircle2, Clock, Check, MapIcon, Menu, Car
 } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -214,6 +214,9 @@ export default function RouteBuilder() {
   const [showAddWaypoint, setShowAddWaypoint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [speedSaving, setSpeedSaving] = useState(false);
+  const [trafficMode, setTrafficMode] = useState(false);
+  const [trafficLoading, setTrafficLoading] = useState(false);
+  const preTrafficStateRef = useRef<{ enabled: boolean; durationS: number | null } | null>(null);
   const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -356,6 +359,52 @@ export default function RouteBuilder() {
     }
   };
 
+  const handleTrafficToggle = async () => {
+    if (!routeId || !existingRoute) return;
+    setTrafficLoading(true);
+    try {
+      const er = existingRoute as any;
+      let body: Record<string, unknown>;
+
+      if (!trafficMode) {
+        const estimatedDurationS: number = er.estimatedDurationS ?? 0;
+        const truckSpeedMph: number = er.truckSpeedMph ?? 60;
+        const trafficSpeedMph = Math.floor(Math.random() * 4) + 19; // 19–22 mph
+        // Worker scales speed profile to truckSpeedMph average, then multiplies by
+        // speedMultiplier = estimatedDurationS / customDurationS.
+        // Setting customDurationS = estimatedDurationS * (truckSpeedMph / trafficSpeedMph)
+        // makes speedMultiplier = trafficSpeedMph / truckSpeedMph, so effective speed = trafficSpeedMph.
+        const customDurationS = Math.round(estimatedDurationS * (truckSpeedMph / trafficSpeedMph));
+        // Save current state so we can restore it when turning off
+        preTrafficStateRef.current = {
+          enabled: er.customDurationEnabled ?? false,
+          durationS: er.customDurationS ?? null,
+        };
+        body = { customDurationEnabled: true, customDurationS };
+      } else {
+        // Restore whatever was active before traffic mode
+        const prev = preTrafficStateRef.current;
+        body = {
+          customDurationEnabled: prev?.enabled ?? false,
+          customDurationS: prev?.durationS ?? null,
+        };
+      }
+
+      const res = await fetch(`/api/routes/${routeId}/speed`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}` },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Failed to toggle traffic mode');
+      setTrafficMode(prev => !prev);
+      await refetchRoute();
+    } catch (err: any) {
+      toast({ title: "Failed", description: err?.message || "Could not toggle traffic mode", variant: "destructive" });
+    } finally {
+      setTrafficLoading(false);
+    }
+  };
+
   const initializedRouteIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -408,6 +457,19 @@ export default function RouteBuilder() {
     const er = existingRoute as any;
     setShowSpeedPublic(er.showSpeedPublic ?? true);
   }, [existingRoute]);
+
+  // Reset traffic mode when route changes or goes non-live
+  useEffect(() => {
+    if (!['in_progress', 'paused'].includes(existingRoute?.status ?? '')) {
+      setTrafficMode(false);
+      preTrafficStateRef.current = null;
+    }
+  }, [existingRoute?.status]);
+
+  useEffect(() => {
+    setTrafficMode(false);
+    preTrafficStateRef.current = null;
+  }, [routeId]);
 
   // --- Resolve Start/End addresses if they are initially coordinates ---
   useEffect(() => {
@@ -1098,6 +1160,26 @@ export default function RouteBuilder() {
                     <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${showSpeedPublic ? 'translate-x-4' : 'translate-x-0.5'}`} />
                   </button>
                 </label>
+
+                {/* Traffic mode — only shown when route is live */}
+                {isLiveRoute && (
+                  <label className="flex items-center justify-between cursor-pointer py-1">
+                    <div className="flex items-center gap-2">
+                      <Car className="w-4 h-4 text-orange-500" />
+                      <span className="text-sm font-medium text-foreground">Heavy traffic</span>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={trafficMode}
+                      disabled={trafficLoading}
+                      onClick={handleTrafficToggle}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${trafficMode ? 'bg-orange-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${trafficMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </label>
+                )}
 
                 <hr className="border-border/40" />
 

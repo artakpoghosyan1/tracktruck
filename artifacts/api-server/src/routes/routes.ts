@@ -510,24 +510,18 @@ router.patch("/routes/:id/speed", async (req, res) => {
         totalElapsedMs += Date.now() - simState.startedAt.getTime();
       }
 
-      // Fetch stops so we can compute naturalTimeS accurately
-      const dbStops = await db.select().from(routeStopsTable)
-        .where(eq(routeStopsTable.routeId, id));
-      const totalStopWaitS = dbStops.reduce((sum, s) => sum + s.durationMinutes * 60, 0);
-      const naturalTimeS = updated.estimatedDurationS + totalStopWaitS;
-
-      // Old multiplier (what was active BEFORE this update)
+      // Multiplier formula MUST match the worker: speedMultiplier = estimatedDurationS / customDurationS
+      // Using naturalTimeS here would diverge from the worker and cause position jumps on toggle.
       const oldEnabled = existing.customDurationEnabled;
       const oldDuration = existing.customDurationS;
-      const oldMult = (oldEnabled && oldDuration && oldDuration > 0 && naturalTimeS > 0)
-        ? naturalTimeS / oldDuration
+      const oldMult = (oldEnabled && oldDuration && oldDuration > 0 && existing.estimatedDurationS > 0)
+        ? existing.estimatedDurationS / oldDuration
         : 1.0;
 
-      // New multiplier (what is now active AFTER this update)
       const newEnabled = updated.customDurationEnabled;
       const newDuration = updated.customDurationS;
-      const newMult = (newEnabled && newDuration && newDuration > 0 && naturalTimeS > 0)
-        ? naturalTimeS / newDuration
+      const newMult = (newEnabled && newDuration && newDuration > 0 && updated.estimatedDurationS > 0)
+        ? updated.estimatedDurationS / newDuration
         : 1.0;
 
       // Adjust elapsed time so truck stays at the same position

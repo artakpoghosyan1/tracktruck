@@ -419,7 +419,7 @@ async function tick() {
     const adminRampFactor = Math.min(1.0, wallElapsedMs / 1000 / RAMP_UP_S);
     const rampFactor = isAtAnyStop ? 0 : Math.min(stopRampFactor, adminRampFactor);
 
-    const targetSpeedMph = isAtAnyStop ? 0 : Math.min(75, Math.max(0, baseSpeedMph * fluctMult * combinedBrakeFactor));
+    const targetSpeedMph = isAtAnyStop ? 0 : Math.min(75, Math.max(0, baseSpeedMph * speedMultiplier * fluctMult * combinedBrakeFactor));
     const currentSpeedMph = Math.max(0, Math.round(targetSpeedMph * rampFactor));
 
     let displayLat = pos.lat, displayLng = pos.lng;
