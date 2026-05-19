@@ -36,6 +36,8 @@ export default function Login() {
       setLocation(returnUrl);
     } else if (data.user.role === 'super_admin') {
       setLocation("/admin/super");
+    } else if (data.user.role === 'org_admin') {
+      setLocation("/admin/org");
     } else {
       setLocation("/admin");
     }

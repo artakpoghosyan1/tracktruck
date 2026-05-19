@@ -5,6 +5,7 @@ import routesRouter from "./routes";
 import simulationRouter from "./simulation";
 import publicRouter from "./public";
 import adminRouter from "./admin";
+import orgRouter from "./org";
 
 const router: IRouter = Router();
 
@@ -17,5 +18,6 @@ router.use(publicRouter);
 router.use(simulationRouter);
 router.use(routesRouter);
 router.use(adminRouter);
+router.use(orgRouter);
 
 export default router;

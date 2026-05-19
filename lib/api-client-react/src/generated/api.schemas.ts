@@ -52,6 +52,7 @@ export type UserProfileRole =
 export const UserProfileRole = {
   super_admin: "super_admin",
   admin: "admin",
+  org_admin: "org_admin",
   user: "user",
 } as const;
 
@@ -61,7 +62,11 @@ export interface UserProfile {
   name: string;
   emailVerified: boolean;
   role: UserProfileRole;
+  organizationId?: number | null;
   createdAt: string;
+  isPaid: boolean;
+  routeLimit: number;
+  usedRoutes: number;
 }
 
 export interface AuthResponse {
@@ -319,6 +324,7 @@ export type AllowedEmailRole =
 export const AllowedEmailRole = {
   super_admin: "super_admin",
   admin: "admin",
+  org_admin: "org_admin",
   user: "user",
 } as const;
 
@@ -330,6 +336,7 @@ export interface AllowedEmail {
   isPaid: boolean;
   routeLimit: number;
   usedRoutes: number;
+  organizationId?: number | null;
   createdAt: string;
 }
 
@@ -339,6 +346,7 @@ export type AddAllowedEmailRequestRole =
 export const AddAllowedEmailRequestRole = {
   super_admin: "super_admin",
   admin: "admin",
+  org_admin: "org_admin",
   user: "user",
 } as const;
 
@@ -348,6 +356,7 @@ export interface AddAllowedEmailRequest {
   role?: AddAllowedEmailRequestRole;
   isPaid?: boolean;
   routeLimit?: number;
+  organizationId?: number;
 }
 
 export type UpdateAllowedEmailRequestRole =
@@ -356,6 +365,7 @@ export type UpdateAllowedEmailRequestRole =
 export const UpdateAllowedEmailRequestRole = {
   super_admin: "super_admin",
   admin: "admin",
+  org_admin: "org_admin",
   user: "user",
 } as const;
 
@@ -365,6 +375,45 @@ export interface UpdateAllowedEmailRequest {
   routeLimit?: number;
   usedRoutes?: number;
   role?: UpdateAllowedEmailRequestRole;
+  organizationId?: number | null;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  isPaid: boolean;
+  routeLimit: number;
+  allocatedRoutes: number;
+  usedRoutes: number;
+  createdAt: string;
+}
+
+export interface CreateOrganizationRequest {
+  name: string;
+  isPaid?: boolean;
+  routeLimit?: number;
+}
+
+export interface UpdateOrganizationRequest {
+  name?: string;
+  isPaid?: boolean;
+  routeLimit?: number;
+}
+
+export interface AddOrgUserRequest {
+  email: string;
+  name?: string;
+  routeLimit?: number;
+}
+
+export interface UpdateOrgUserRequest {
+  routeLimit: number;
+  name?: string;
+}
+
+export interface ListOrgUsersResponse {
+  organization: Organization | null;
+  members: AllowedEmail[];
 }
 
 export type ListRoutesParams = {

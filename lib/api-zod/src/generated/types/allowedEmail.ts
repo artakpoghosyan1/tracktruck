@@ -15,5 +15,6 @@ export interface AllowedEmail {
   isPaid: boolean;
   routeLimit: number;
   usedRoutes: number;
+  organizationId?: number | null;
   createdAt: Date;
 }

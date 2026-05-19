@@ -12,5 +12,6 @@ export type UserProfileRole =
 export const UserProfileRole = {
   super_admin: "super_admin",
   admin: "admin",
+  org_admin: "org_admin",
   user: "user",
 } as const;

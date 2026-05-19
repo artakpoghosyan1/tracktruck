@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, isNull } from "drizzle-orm";
 import crypto from "crypto";
-import { db, routesTable, simulationStatesTable, shareLinksTable, allowedEmailsTable } from "@workspace/db";
+import { db, routesTable, simulationStatesTable, shareLinksTable, allowedEmailsTable, organizationsTable } from "@workspace/db";
 import {
   ActivateRouteParams,
   StartRouteParams,
@@ -47,7 +47,17 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
   }
 
   const [allowed] = await db.select().from(allowedEmailsTable).where(eq(allowedEmailsTable.email, authReq.user.email)).limit(1);
-  if (allowed && allowed.role === 'user' && allowed.usedRoutes >= allowed.routeLimit) {
+
+  // Check isPaid via org if user belongs to one
+  if (allowed?.organizationId) {
+    const [org] = await db.select({ isPaid: organizationsTable.isPaid }).from(organizationsTable).where(eq(organizationsTable.id, allowed.organizationId)).limit(1);
+    if (org && !org.isPaid) {
+      res.status(402).json({ error: "payment_required", message: "Your organization's subscription is inactive. Please contact your administrator." });
+      return;
+    }
+  }
+
+  if (allowed && (allowed.role === 'user' || allowed.role === 'org_admin') && allowed.usedRoutes >= allowed.routeLimit) {
     res.status(403).json({ error: "quota_exceeded", message: "Route limit reached. Upgrade your plan to activate more routes." });
     return;
   }

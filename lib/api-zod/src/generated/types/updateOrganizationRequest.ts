@@ -5,13 +5,9 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AddAllowedEmailRequestRole } from "./addAllowedEmailRequestRole";
 
-export interface AddAllowedEmailRequest {
-  email: string;
+export interface UpdateOrganizationRequest {
   name?: string;
-  role?: AddAllowedEmailRequestRole;
   isPaid?: boolean;
   routeLimit?: number;
-  organizationId?: number;
 }

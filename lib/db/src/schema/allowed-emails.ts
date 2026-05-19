@@ -1,14 +1,16 @@
 import { pgTable, serial, text, timestamp, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
+import { organizationsTable } from "./organizations";
 
 export const allowedEmailsTable = pgTable("allowed_emails", {
   id: serial("id").primaryKey(),
   email: text("email").notNull().unique(),
   name: text("name"),
-  role: text("role", { enum: ["super_admin", "admin", "user"] }).notNull().default("user"),
+  role: text("role", { enum: ["super_admin", "admin", "org_admin", "user"] }).notNull().default("user"),
   isPaid: boolean("is_paid").notNull().default(true),
   routeLimit: integer("route_limit").notNull().default(25),
   usedRoutes: integer("used_routes").notNull().default(0),
+  organizationId: integer("organization_id").references(() => organizationsTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

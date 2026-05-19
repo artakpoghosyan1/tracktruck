@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { Map, LayoutDashboard, Truck, LogOut, Loader2, ShieldCheck } from "lucide-react";
+import { Map, LayoutDashboard, Truck, LogOut, Loader2, ShieldCheck, Users } from "lucide-react";
 import { useAuthMe, getAuthMeQueryKey } from "@workspace/api-client-react";
 import { useAppStore } from "@/store/use-app-store";
 
@@ -60,6 +60,10 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
     navItems.push({ label: "Clients", href: "/admin/super", icon: ShieldCheck });
   }
 
+  if (user.role === 'org_admin') {
+    navItems.push({ label: "My Organization", href: "/admin/org", icon: Users });
+  }
+
   return (
     <div className="h-screen overflow-hidden bg-background flex flex-col md:flex-row">
       {/* Mobile Header */}
@@ -98,7 +102,7 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
             {navItems.map((item) => {
               const active = location === item.href || (item.href !== '/admin' && location.startsWith(item.href));
               const isCreateRouteLink = item.href === "/admin/routes/new";
-              const isQuotaReached = user?.role === 'user' && (user as any).usedRoutes >= (user as any).routeLimit;
+              const isQuotaReached = (user?.role === 'user' || user?.role === 'org_admin') && (user as any).usedRoutes >= (user as any).routeLimit;
               const disabled = isCreateRouteLink && isQuotaReached;
 
               if (disabled) {

@@ -688,10 +688,11 @@ export const ListAllowedEmailsResponseItem = zod.object({
   id: zod.number(),
   email: zod.string(),
   name: zod.string().nullish(),
-  role: zod.enum(["super_admin", "admin", "user"]),
+  role: zod.enum(["super_admin", "admin", "org_admin", "user"]),
   isPaid: zod.boolean(),
   routeLimit: zod.number(),
   usedRoutes: zod.number(),
+  organizationId: zod.number().nullish(),
   createdAt: zod.date(),
 });
 export const ListAllowedEmailsResponse = zod.array(
@@ -709,10 +710,11 @@ export const AddAllowedEmailBody = zod.object({
   email: zod.string().email(),
   name: zod.string().optional(),
   role: zod
-    .enum(["super_admin", "admin", "user"])
+    .enum(["super_admin", "admin", "org_admin", "user"])
     .default(addAllowedEmailBodyRoleDefault),
   isPaid: zod.boolean().default(addAllowedEmailBodyIsPaidDefault),
   routeLimit: zod.number().default(addAllowedEmailBodyRouteLimitDefault),
+  organizationId: zod.number().optional(),
 });
 
 /**
@@ -738,16 +740,144 @@ export const UpdateAllowedEmailBody = zod.object({
   isPaid: zod.boolean().optional(),
   routeLimit: zod.number().optional(),
   usedRoutes: zod.number().optional(),
-  role: zod.enum(["super_admin", "admin", "user"]).optional(),
+  role: zod.enum(["super_admin", "admin", "org_admin", "user"]).optional(),
+  organizationId: zod.number().nullable().optional(),
 });
 
 export const UpdateAllowedEmailResponse = zod.object({
   id: zod.number(),
   email: zod.string(),
   name: zod.string().nullish(),
-  role: zod.enum(["super_admin", "admin", "user"]),
+  role: zod.enum(["super_admin", "admin", "org_admin", "user"]),
   isPaid: zod.boolean(),
   routeLimit: zod.number(),
   usedRoutes: zod.number(),
+  organizationId: zod.number().nullish(),
   createdAt: zod.date(),
+});
+
+/**
+ * @summary List all organizations
+ */
+export const ListOrganizationsResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  isPaid: zod.boolean(),
+  routeLimit: zod.number(),
+  allocatedRoutes: zod.number(),
+  createdAt: zod.date(),
+});
+export const ListOrganizationsResponse = zod.array(ListOrganizationsResponseItem);
+
+/**
+ * @summary Create a new organization
+ */
+export const createOrganizationBodyIsPaidDefault = false;
+export const createOrganizationBodyRouteLimitDefault = 0;
+
+export const CreateOrganizationBody = zod.object({
+  name: zod.string().min(1),
+  isPaid: zod.boolean().default(createOrganizationBodyIsPaidDefault),
+  routeLimit: zod.number().default(createOrganizationBodyRouteLimitDefault),
+});
+
+export const CreateOrganizationResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  isPaid: zod.boolean(),
+  routeLimit: zod.number(),
+  allocatedRoutes: zod.number(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Update an organization
+ */
+export const UpdateOrganizationParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateOrganizationBody = zod.object({
+  name: zod.string().min(1).optional(),
+  isPaid: zod.boolean().optional(),
+  routeLimit: zod.number().min(0).optional(),
+});
+
+export const UpdateOrganizationResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  isPaid: zod.boolean(),
+  routeLimit: zod.number(),
+  allocatedRoutes: zod.number(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Delete an organization
+ */
+export const DeleteOrganizationParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteOrganizationResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
+ * @summary List users in the caller's organization
+ */
+export const ListOrgUsersResponse = zod.object({
+  organization: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    isPaid: zod.boolean(),
+    routeLimit: zod.number(),
+    allocatedRoutes: zod.number(),
+    createdAt: zod.date(),
+  }).nullable(),
+  members: zod.array(zod.object({
+    id: zod.number(),
+    email: zod.string(),
+    name: zod.string().nullish(),
+    role: zod.enum(["super_admin", "admin", "org_admin", "user"]),
+    isPaid: zod.boolean(),
+    routeLimit: zod.number(),
+    usedRoutes: zod.number(),
+    organizationId: zod.number().nullish(),
+    createdAt: zod.date(),
+  })),
+});
+
+/**
+ * @summary Add a user to the organization
+ */
+export const addOrgUserBodyRouteLimitDefault = 0;
+
+export const AddOrgUserBody = zod.object({
+  email: zod.string().email(),
+  name: zod.string().optional(),
+  routeLimit: zod.number().min(0).default(addOrgUserBodyRouteLimitDefault),
+});
+
+/**
+ * @summary Update a user's quota allocation
+ */
+export const UpdateOrgUserParams = zod.object({
+  email: zod.coerce.string(),
+});
+
+export const UpdateOrgUserBody = zod.object({
+  routeLimit: zod.number().min(0),
+  name: zod.string().optional(),
+});
+
+/**
+ * @summary Remove a user from the organization
+ */
+export const RemoveOrgUserParams = zod.object({
+  email: zod.coerce.string(),
+});
+
+export const RemoveOrgUserResponse = zod.object({
+  message: zod.string(),
 });

@@ -22,6 +22,8 @@ tags:
     description: Public tracking
   - name: admin
     description: Super Admin operations
+  - name: org
+    description: Organization admin operations
 
 paths:
   /healthz:
@@ -745,6 +747,219 @@ paths:
         "404":
           description: Not found
 
+  /admin/organizations:
+    get:
+      operationId: listOrganizations
+      tags: [admin]
+      summary: List all organizations
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of organizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Organization"
+        "403":
+          description: Forbidden
+
+    post:
+      operationId: createOrganization
+      tags: [admin]
+      summary: Create a new organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden
+
+  /admin/organizations/{id}:
+    put:
+      operationId: updateOrganization
+      tags: [admin]
+      summary: Update an organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationRequest"
+      responses:
+        "200":
+          description: Organization updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+
+    delete:
+      operationId: deleteOrganization
+      tags: [admin]
+      summary: Delete an organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Organization deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Organization still has members
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+
+  /org/users:
+    get:
+      operationId: listOrgUsers
+      tags: [org]
+      summary: List users in the caller's organization
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Org members and organization info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization:
+                    $ref: "#/components/schemas/Organization"
+                    nullable: true
+                  members:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AllowedEmail"
+                required:
+                  - organization
+                  - members
+        "403":
+          description: Forbidden
+
+    post:
+      operationId: addOrgUser
+      tags: [org]
+      summary: Add a user to the organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddOrgUserRequest"
+      responses:
+        "201":
+          description: User added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllowedEmail"
+        "400":
+          description: Quota exceeded or validation error
+        "403":
+          description: Forbidden
+        "409":
+          description: Email already exists
+
+  /org/users/{email}:
+    put:
+      operationId: updateOrgUser
+      tags: [org]
+      summary: Update a user's quota allocation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: email
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgUserRequest"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllowedEmail"
+        "400":
+          description: Quota exceeded
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+
+    delete:
+      operationId: removeOrgUser
+      tags: [org]
+      summary: Remove a user from the organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: email
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+
 components:
   securitySchemes:
     bearerAuth:
@@ -868,10 +1083,19 @@ components:
           type: boolean
         role:
           type: string
-          enum: [super_admin, admin, user]
+          enum: [super_admin, admin, org_admin, user]
+        organizationId:
+          type: integer
+          nullable: true
         createdAt:
           type: string
           format: date-time
+        isPaid:
+          type: boolean
+        routeLimit:
+          type: integer
+        usedRoutes:
+          type: integer
       required:
         - id
         - email
@@ -879,6 +1103,9 @@ components:
         - emailVerified
         - role
         - createdAt
+        - isPaid
+        - routeLimit
+        - usedRoutes
 
     CreateRouteRequest:
       type: object
@@ -1387,13 +1614,16 @@ components:
           nullable: true
         role:
           type: string
-          enum: [super_admin, admin, user]
+          enum: [super_admin, admin, org_admin, user]
         isPaid:
           type: boolean
         routeLimit:
           type: integer
         usedRoutes:
           type: integer
+        organizationId:
+          type: integer
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -1416,7 +1646,7 @@ components:
           type: string
         role:
           type: string
-          enum: [super_admin, admin, user]
+          enum: [super_admin, admin, org_admin, user]
           default: user
         isPaid:
           type: boolean
@@ -1424,6 +1654,8 @@ components:
         routeLimit:
           type: integer
           default: 25
+        organizationId:
+          type: integer
       required:
         - email
 
@@ -1440,5 +1672,84 @@ components:
           type: integer
         role:
           type: string
-          enum: [super_admin, admin, user]
+          enum: [super_admin, admin, org_admin, user]
+        organizationId:
+          type: integer
+          nullable: true
       required: []
+
+    Organization:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        isPaid:
+          type: boolean
+        routeLimit:
+          type: integer
+        allocatedRoutes:
+          type: integer
+        usedRoutes:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - isPaid
+        - routeLimit
+        - allocatedRoutes
+        - usedRoutes
+        - createdAt
+
+    CreateOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        isPaid:
+          type: boolean
+          default: false
+        routeLimit:
+          type: integer
+          default: 0
+      required:
+        - name
+
+    UpdateOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        isPaid:
+          type: boolean
+        routeLimit:
+          type: integer
+      required: []
+
+    AddOrgUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        routeLimit:
+          type: integer
+          default: 0
+      required:
+        - email
+
+    UpdateOrgUserRequest:
+      type: object
+      properties:
+        routeLimit:
+          type: integer
+        name:
+          type: string
+      required:
+        - routeLimit

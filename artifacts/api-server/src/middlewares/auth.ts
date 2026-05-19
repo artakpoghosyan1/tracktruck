@@ -64,3 +64,15 @@ export function requireAdmin(): RequestHandler {
     next();
   };
 }
+
+export function requireOrgAdmin(): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthRequest;
+    const role = authReq.user?.role;
+    if (role !== "org_admin" && role !== "admin" && role !== "super_admin") {
+      res.status(403).json({ error: "forbidden", message: "Org admin access required" });
+      return;
+    }
+    next();
+  };
+}

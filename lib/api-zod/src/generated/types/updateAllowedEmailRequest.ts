@@ -13,4 +13,5 @@ export interface UpdateAllowedEmailRequest {
   routeLimit?: number;
   usedRoutes?: number;
   role?: UpdateAllowedEmailRequestRole;
+  organizationId?: number | null;
 }
