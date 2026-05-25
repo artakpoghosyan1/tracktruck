@@ -1096,6 +1096,9 @@ components:
           type: integer
         usedRoutes:
           type: integer
+        orgRemainingRoutes:
+          type: integer
+          nullable: true
       required:
         - id
         - email

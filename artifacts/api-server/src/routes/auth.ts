@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, sql } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import rateLimit from "express-rate-limit";
 import { db, usersTable, oauthAccountsTable, refreshTokensTable, allowedEmailsTable, organizationsTable } from "@workspace/db";
@@ -447,7 +447,19 @@ router.get("/auth/me", requireAuth(), async (req, res) => {
     }
   }
 
-  res.json(userPayload({ ...user, ...allowedData }));
+  let orgRemainingRoutes: number | null = null;
+  if (user.role === 'org_admin' && allowedData.organizationId) {
+    const [org] = await db.select({ routeLimit: organizationsTable.routeLimit }).from(organizationsTable).where(eq(organizationsTable.id, allowedData.organizationId)).limit(1);
+    if (org) {
+      const [{ allocated }] = await db
+        .select({ allocated: sql<number>`coalesce(sum(${allowedEmailsTable.routeLimit}), 0)` })
+        .from(allowedEmailsTable)
+        .where(eq(allowedEmailsTable.organizationId, allowedData.organizationId));
+      orgRemainingRoutes = org.routeLimit - Number(allocated);
+    }
+  }
+
+  res.json({ ...userPayload({ ...user, ...allowedData }), orgRemainingRoutes });
 });
 
 // Stub: password reset — email sending not yet implemented

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import crypto from "crypto";
 import { db, routesTable, simulationStatesTable, shareLinksTable, allowedEmailsTable, organizationsTable } from "@workspace/db";
 import {
@@ -57,17 +57,35 @@ router.post("/routes/:id/activate", validate({ params: ActivateRouteParams }), a
     }
   }
 
+  let autoExpandLimit = false;
   if (allowed && (allowed.role === 'user' || allowed.role === 'org_admin') && allowed.usedRoutes >= allowed.routeLimit) {
-    res.status(403).json({ error: "quota_exceeded", message: "Route limit reached. Upgrade your plan to activate more routes." });
-    return;
+    if (allowed.role === 'org_admin' && allowed.organizationId) {
+      const [org] = await db.select({ routeLimit: organizationsTable.routeLimit }).from(organizationsTable).where(eq(organizationsTable.id, allowed.organizationId)).limit(1);
+      if (org) {
+        const [{ allocated }] = await db
+          .select({ allocated: sql<number>`coalesce(sum(${allowedEmailsTable.routeLimit}), 0)` })
+          .from(allowedEmailsTable)
+          .where(eq(allowedEmailsTable.organizationId, allowed.organizationId));
+        if (org.routeLimit - Number(allocated) > 0) {
+          autoExpandLimit = true;
+        }
+      }
+    }
+    if (!autoExpandLimit) {
+      res.status(403).json({ error: "quota_exceeded", message: "Route limit reached. Upgrade your plan to activate more routes." });
+      return;
+    }
   }
 
-  // Move route to ready and increment used routes
+  // Move route to ready and increment used routes (also expand routeLimit if auto-assigned from org pool)
   await db.transaction(async (tx) => {
     await tx.update(routesTable).set({ status: "ready", updatedAt: new Date() }).where(eq(routesTable.id, routeId));
     if (allowed) {
       await tx.update(allowedEmailsTable)
-        .set({ usedRoutes: (allowed.usedRoutes || 0) + 1 })
+        .set({
+          usedRoutes: (allowed.usedRoutes || 0) + 1,
+          ...(autoExpandLimit ? { routeLimit: (allowed.routeLimit || 0) + 1 } : {}),
+        })
         .where(eq(allowedEmailsTable.email, authReq.user.email));
     }
   });

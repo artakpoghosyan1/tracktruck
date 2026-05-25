@@ -55,6 +55,7 @@ export default function OrgAdmin() {
   const refetch = () => queryClient.invalidateQueries({ queryKey: getListOrgUsersQueryKey() });
 
   const remaining = org ? org.routeLimit - org.allocatedRoutes : 0;
+  const totalUsedRoutes = members.reduce((sum, m) => sum + (m.usedRoutes ?? 0), 0);
 
   const addMutation = useAddOrgUser({
     mutation: {
@@ -144,7 +145,7 @@ export default function OrgAdmin() {
 
         {/* Org quota card */}
         {org && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="bg-card border border-border/60 rounded-2xl p-5">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Organization</p>
               <p className="text-lg font-bold text-foreground truncate">{org.name}</p>
@@ -161,6 +162,11 @@ export default function OrgAdmin() {
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Remaining</p>
               <p className={`text-3xl font-bold ${remaining <= 0 ? "text-destructive" : "text-foreground"}`}>{remaining}</p>
               <p className="text-xs text-muted-foreground mt-1">{org.allocatedRoutes} allocated</p>
+            </div>
+            <div className="bg-card border border-border/60 rounded-2xl p-5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Total Used</p>
+              <p className="text-3xl font-bold text-foreground">{totalUsedRoutes}</p>
+              <p className="text-xs text-muted-foreground mt-1">across all members</p>
             </div>
           </div>
         )}

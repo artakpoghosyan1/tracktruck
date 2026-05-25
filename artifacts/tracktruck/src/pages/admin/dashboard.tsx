@@ -31,7 +31,8 @@ export default function Dashboard() {
   const { user, setAuthenticated } = useAppStore();
   const { toast } = useToast();
   
-  const isQuotaReached = user?.role === 'user' && (user as any).usedRoutes >= (user as any).routeLimit;
+  const hasOrgPool = user?.role === 'org_admin' && ((user as any).orgRemainingRoutes ?? 0) > 0;
+  const isQuotaReached = (user?.role === 'user' || user?.role === 'org_admin') && (user as any).usedRoutes >= (user as any).routeLimit && !hasOrgPool;
 
   const { data: meData, refetch: refetchMe } = useAuthMe({
     query: {
@@ -136,10 +137,20 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-foreground">Routes</h1>
           <p className="text-muted-foreground mt-1">Manage and track your fleet deliveries.</p>
         </div>
-        <Link href="/admin/routes/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-all">
-          <Plus className="w-5 h-5" />
-          Create Route
-        </Link>
+        {isQuotaReached ? (
+          <span
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-muted text-muted-foreground rounded-xl font-semibold cursor-not-allowed opacity-50"
+            title="Route limit reached. Deactivate or delete routes to create more."
+          >
+            <Plus className="w-5 h-5" />
+            Create Route
+          </span>
+        ) : (
+          <Link href="/admin/routes/new" className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-all">
+            <Plus className="w-5 h-5" />
+            Create Route
+          </Link>
+        )}
       </div>
       
       {user?.role === 'user' && (

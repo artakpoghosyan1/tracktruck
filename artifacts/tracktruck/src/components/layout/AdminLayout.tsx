@@ -15,7 +15,7 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
   const { setAuthenticated } = useAppStore();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
-  const { data: user, isLoading, isError } = useAuthMe({
+  const { data: user, isLoading, isError, refetch: refetchMe } = useAuthMe({
     query: {
       queryKey: getAuthMeQueryKey(),
       retry: false,
@@ -49,6 +49,19 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
     localStorage.removeItem('tracktruck_token');
     setAuthenticated(false);
     setLocation("/login");
+  };
+
+  const handleCreateRouteClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsMobileOpen(false);
+    const { data: freshUser } = await refetchMe();
+    if (!freshUser) return;
+    const freshHasOrgPool = freshUser.role === 'org_admin' && ((freshUser as any).orgRemainingRoutes ?? 0) > 0;
+    const freshQuotaReached = (freshUser.role === 'user' || freshUser.role === 'org_admin') &&
+      (freshUser as any).usedRoutes >= (freshUser as any).routeLimit && !freshHasOrgPool;
+    if (!freshQuotaReached) {
+      setLocation('/admin/routes/new');
+    }
   };
 
   const navItems = [
@@ -102,7 +115,8 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
             {navItems.map((item) => {
               const active = location === item.href || (item.href !== '/admin' && location.startsWith(item.href));
               const isCreateRouteLink = item.href === "/admin/routes/new";
-              const isQuotaReached = (user?.role === 'user' || user?.role === 'org_admin') && (user as any).usedRoutes >= (user as any).routeLimit;
+              const hasOrgPool = user?.role === 'org_admin' && ((user as any).orgRemainingRoutes ?? 0) > 0;
+              const isQuotaReached = (user?.role === 'user' || user?.role === 'org_admin') && (user as any).usedRoutes >= (user as any).routeLimit && !hasOrgPool;
               const disabled = isCreateRouteLink && isQuotaReached;
 
               if (disabled) {
@@ -120,10 +134,10 @@ export function AdminLayout({ children, fullscreen = false }: AdminLayoutProps) 
               }
 
               return (
-                <Link 
-                  key={item.href} 
+                <Link
+                  key={item.href}
                   href={item.href}
-                  onClick={() => setIsMobileOpen(false)}
+                  onClick={isCreateRouteLink ? handleCreateRouteClick : () => setIsMobileOpen(false)}
                   className={`
                     w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all duration-200
                     ${active 
