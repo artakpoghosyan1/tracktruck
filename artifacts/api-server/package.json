@@ -20,6 +20,7 @@
     "express-rate-limit": "^8.3.2",
     "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.3",
+    "tz-lookup": "^6.1.25",
     "ws": "^8.19.0",
     "zod": "^3.25.0"
   },

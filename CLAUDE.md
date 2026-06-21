@@ -64,7 +64,7 @@ A route is start point + end point + a **polyline** (array of `[lng, lat]`) plus
 
 - **Stops** (`route_stops`) — named intermediate points with a **dwell time** (`durationMinutes`, default 5). While the vehicle is parked at a stop the engine broadcasts a countdown (`stopDwellRemainingS`) and the public status becomes `at_stop`. Stops can be added/removed while the route is `in_progress`; the engine recomputes from the current position so the marker doesn't jump backward.
 - **Waypoints** (`routes.waypoints`, also baked into the polyline) — steering points that shape the path but have no dwell. Editing the polyline/waypoints on an `in_progress` route keeps the vehicle moving from its current position onto the new path (it only fully resets if the start/end points change).
-- **Target duration / ETA** — instead of pure speed-limit timing, a user can pin how long the trip should take. `routes.customDurationS` + `customDurationEnabled` make the engine apply a speed multiplier (`estimatedDurationS / customDurationS`) so the vehicle arrives at the chosen time. Speed/duration changes are **unlimited** and do **not** count as route edits.
+- **Destination ETA** — a user can pin a wall-clock arrival time at the destination. `routes.etaTargetUtc` (UTC timestamp) and `routes.etaTimezone` (IANA timezone string, e.g. `"America/Phoenix"`) store this. The engine applies a speed multiplier (`estimatedDurationS / (etaTargetUtc − startedAt)`) so the vehicle arrives at the chosen time. ETA is set/cleared via `PATCH /routes/:id/speed` with `etaTargetUtc`/`etaTimezone` fields; the `EtaWidget` component on the admin dashboard auto-detects the destination timezone from coordinates using `GET /api/utils/timezone` (backed by `tz-lookup`) and suggests adding stops when the required travel speed is unrealistically slow (<10 mph). ETA changes are **unlimited** and do **not** count as route edits.
 - **One edit while running** — for `user` role only, a started route (`in_progress`/`paused`) may have its *meaningful* fields (start/end/name/route geometry) changed **only once**; further changes return **403**. Tracked via `routes.updateCount`. Speed-only and waypoint-only changes don't increment it. `org_admin` and above are not limited. (The `route_revisions` table exists but is **not used** to enforce or record this.)
 - **Pause/resume** — pausing preserves accumulated elapsed time (`effectiveElapsedMs`) and broadcasts a speed-0 snapshot so the public map stops moving; resuming continues from where it left off.
 
@@ -191,5 +191,6 @@ Root `tsconfig.json` uses composite project references. Always typecheck from th
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan at
+`specs/001-timezone-eta-stops/plan.md`
 <!-- SPECKIT END -->

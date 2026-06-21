@@ -25,8 +25,8 @@ export const routesTable = pgTable("routes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updateCount: integer("update_count").notNull().default(0),
-  customDurationS: doublePrecision("custom_duration_s"),
-  customDurationEnabled: boolean("custom_duration_enabled").notNull().default(false),
+  etaTargetUtc: timestamp("eta_target_utc"),
+  etaTimezone: text("eta_timezone"),
   showSpeedPublic: boolean("show_speed_public").notNull().default(true),
 }, (t) => [
   // Simulation tick queries all in_progress routes every 2 s — needs index to avoid full table scan

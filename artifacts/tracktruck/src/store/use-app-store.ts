@@ -7,7 +7,7 @@ interface User {
   id: number;
   email: string;
   name: string;
-  role: 'super_admin' | 'admin' | 'user';
+  role: 'super_admin' | 'admin' | 'org_admin' | 'user';
 }
 
 interface AppState {

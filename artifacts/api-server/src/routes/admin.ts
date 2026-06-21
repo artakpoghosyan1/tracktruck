@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
-import { db, allowedEmailsTable, organizationsTable } from "@workspace/db";
+import { db, allowedEmailsTable, organizationsTable, usersTable } from "@workspace/db";
 import { validate } from "../middlewares/validate";
 import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth";
 import { ROOT_ADMIN_EMAIL } from "../lib/config";
@@ -170,6 +170,8 @@ router.delete("/admin/allowed-emails/:email", requireAdmin(), async (req, res) =
     res.status(404).json({ error: "not_found", message: "Email not found in allowed list" });
     return;
   }
+
+  await db.delete(usersTable).where(eq(usersTable.email, lowerEmail));
 
   res.json({ message: "Email removed successfully" });
 });

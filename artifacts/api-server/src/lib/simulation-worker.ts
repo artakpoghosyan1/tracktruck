@@ -350,9 +350,9 @@ async function tick() {
     .select({
       route: {
         id: routesTable.id, status: routesTable.status,
-        truckSpeedMph: routesTable.truckSpeedMph, customDurationS: routesTable.customDurationS,
-        customDurationEnabled: routesTable.customDurationEnabled,
+        truckSpeedMph: routesTable.truckSpeedMph,
         estimatedDurationS: routesTable.estimatedDurationS, distanceM: routesTable.distanceM,
+        etaTargetUtc: routesTable.etaTargetUtc, etaTimezone: routesTable.etaTimezone,
       },
       simState: simulationStatesTable,
     })
@@ -379,8 +379,16 @@ async function tick() {
 
     cache.lastAccessedTick = tickCount;
 
-    const speedMultiplier = (route.customDurationEnabled && route.customDurationS && route.customDurationS > 0)
-      ? (route.estimatedDurationS / route.customDurationS) : 1.0;
+    const etaDurationS = (route.etaTargetUtc && simState.startedAt)
+      ? (route.etaTargetUtc.getTime() - simState.startedAt.getTime()) / 1000
+      : null;
+    // Subtract total user-stop dwell time so the multiplier governs only moving time
+    const totalStopDwellS = cache.sortedStops
+      .filter(s => s.routeStopId != null)
+      .reduce((sum, s) => sum + s.durationS, 0);
+    const etaMovingTimeS = etaDurationS != null ? etaDurationS - totalStopDwellS : null;
+    const speedMultiplier = (etaMovingTimeS && etaMovingTimeS > 0 && route.estimatedDurationS > 0)
+      ? route.estimatedDurationS / etaMovingTimeS : 1.0;
 
     // When a stop is deleted while the truck is waiting at it, reset effectiveElapsedMs
     // so the truck continues from that position rather than jumping forward.
@@ -388,24 +396,20 @@ async function tick() {
     let startedAtMs = simState.startedAt.getTime();
     if (resumeFromPositionSet.has(route.id)) {
       resumeFromPositionSet.delete(route.id);
-      const meta = resumeMetadataMap.get(route.id);
       resumeMetadataMap.delete(route.id);
 
-      const currentWallMs = Math.max(0, nowMs - startedAtMs);
-      const currentTotalElapsedS = (effectiveElapsedMs + currentWallMs) / 1000;
-      const multForCurrentPos = meta?.oldMult ?? speedMultiplier;
-      const currentPos = computePositionWithStops(
-        currentTotalElapsedS, cache.polyline, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, multForCurrentPos,
-      );
+      // Anchor to the last known distance from the previous tick — never recompute
+      // position from a multiplier because any multiplier change would produce a jump.
       const resumeDistM = Math.max(
-        currentPos.distanceTraveledM,
-        simState.distanceTraveledM ?? 0,
         lastKnownDistM.get(route.id) ?? 0,
+        simState.distanceTraveledM ?? 0,
       );
 
       // Drop stops the truck has already passed so recalibration does not snap back to them.
       cache.sortedStops = filterPassedStops(cache.sortedStops, resumeDistM);
 
+      // Recalibrate effectiveElapsedMs so that with the new speedMultiplier the truck
+      // resumes from exactly resumeDistM on the next tick.
       const adjustedElapsedS = timeToReachDistanceM(
         resumeDistM, cache.sortedStops, cache.speedProfile, route.truckSpeedMph, speedMultiplier,
       );
@@ -419,12 +423,8 @@ async function tick() {
           startedAt: new Date(nowMs),
           distanceTraveledM: resumeDistM,
           progressPercent: resumeAlong.progressPercent,
-          atStopRouteStopId: currentPos.atStopRouteStopId,
-          stopArrivedAt: currentPos.atStopRouteStopId
-            ? (currentPos.atStopRouteStopId === simState.atStopRouteStopId && simState.stopArrivedAt
-              ? simState.stopArrivedAt
-              : new Date(nowMs))
-            : null,
+          atStopRouteStopId: simState.atStopRouteStopId,
+          stopArrivedAt: simState.stopArrivedAt,
         })
         .where(eq(simulationStatesTable.routeId, route.id));
       lastKnownDistM.set(route.id, resumeDistM);
@@ -532,6 +532,8 @@ async function tick() {
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent, lat: displayLat, lng: displayLng,
       bearing: pos.bearing, speedMph: currentSpeedMph,
+      etaTargetUtc: route.etaTargetUtc?.toISOString() ?? null,
+      etaTimezone: route.etaTimezone ?? null,
     };
 
     broadcastQueue.push({ tokens: cache.shareTokens, routeId: route.id, snapshot });

@@ -15,6 +15,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { MapboxPrompt } from "@/components/MapboxPrompt";
 import { AddressSearch } from "@/components/AddressSearch";
+import { EtaWidget } from "@/components/EtaWidget";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
@@ -25,6 +26,17 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
 
@@ -216,7 +228,7 @@ export default function RouteBuilder() {
   const [trafficMode, setTrafficMode] = useState(false);
   const trafficModeRef = useRef(false);
   const [trafficLoading, setTrafficLoading] = useState(false);
-  const preTrafficStateRef = useRef<{ enabled: boolean; durationS: number | null } | null>(null);
+  const preTrafficStateRef = useRef<{ speedMph: number } | null>(null);
   const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -226,6 +238,8 @@ export default function RouteBuilder() {
     lat: number; lng: number; bearing: number; speedMph: number;
     atStopRouteStopId: number | null;
     stopDwellRemainingS: number | null;
+    distanceTraveledM?: number;
+    progressPercent?: number;
   } | null>(null);
 
   const [countdownSec, setCountdownSec] = useState<number | null>(null);
@@ -250,12 +264,12 @@ export default function RouteBuilder() {
   const [routeChangeMode, setRouteChangeMode] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
-  // Custom simulation duration
-  const [useCustomDuration, setUseCustomDuration] = useState(false);
-  const [customDurationMinutes, setCustomDurationMinutes] = useState(0);
-
   // Speed visibility for public tracking page
   const [showSpeedPublic, setShowSpeedPublic] = useState(true);
+
+  // ETA state
+  const [etaTargetUtc, setEtaTargetUtc] = useState<string | null>(null);
+  const [etaTimezone, setEtaTimezone] = useState<string | null>(null);
 
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
@@ -357,27 +371,12 @@ export default function RouteBuilder() {
       let body: Record<string, unknown>;
 
       if (nextMode) {
-        const estimatedDurationS: number = er.estimatedDurationS ?? 0;
-        const truckSpeedMph: number = er.truckSpeedMph ?? 60;
+        // Save current speed so we can restore it when turning off
+        preTrafficStateRef.current = { speedMph: er.truckSpeedMph ?? 60 };
         const trafficSpeedMph = Math.floor(Math.random() * 4) + 19; // 19–22 mph
-        // Worker scales speed profile to truckSpeedMph average, then multiplies by
-        // speedMultiplier = estimatedDurationS / customDurationS.
-        // Setting customDurationS = estimatedDurationS * (truckSpeedMph / trafficSpeedMph)
-        // makes speedMultiplier = trafficSpeedMph / truckSpeedMph, so effective speed = trafficSpeedMph.
-        const customDurationS = Math.round(estimatedDurationS * (truckSpeedMph / trafficSpeedMph));
-        // Save current state so we can restore it when turning off
-        preTrafficStateRef.current = {
-          enabled: er.customDurationEnabled ?? false,
-          durationS: er.customDurationS ?? null,
-        };
-        body = { customDurationEnabled: true, customDurationS };
+        body = { truckSpeedMph: trafficSpeedMph };
       } else {
-        // Restore whatever was active before traffic mode
-        const prev = preTrafficStateRef.current;
-        body = {
-          customDurationEnabled: prev?.enabled ?? false,
-          customDurationS: prev?.durationS ?? null,
-        };
+        body = { truckSpeedMph: preTrafficStateRef.current?.speedMph ?? 60 };
       }
 
       const res = await fetch(`/api/routes/${routeId}/speed`, {
@@ -393,6 +392,50 @@ export default function RouteBuilder() {
     } finally {
       setTrafficLoading(false);
     }
+  };
+
+  const handleEtaChange = async (utc: string | null, tz: string | null) => {
+    setEtaTargetUtc(utc);
+    setEtaTimezone(tz);
+    if (!routeId) return;
+    try {
+      // Flush unsaved stops first so the engine sees the new dwell time
+      // before it recalculates the speed multiplier for the new ETA.
+      if (stopDirtyRef.current) {
+        stopDirtyRef.current = false;
+        const synced = await syncStopsToBackend(stopsRef.current);
+        setStops(synced);
+      }
+      const res = await fetch(`/api/routes/${routeId}/speed`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+        },
+        body: JSON.stringify({ etaTargetUtc: utc, etaTimezone: tz }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Failed to update ETA", description: err.message ?? "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: utc ? "ETA saved" : "ETA cleared" });
+      }
+    } catch (err: any) {
+      toast({ title: "Failed to update ETA", description: err?.message ?? "", variant: "destructive" });
+    }
+  };
+
+  const handleAddSuggestedStops = (newStops: { name: string; lat: number; lng: number; durationMinutes: number }[]) => {
+    const added = newStops.map(s => ({
+      id: `client-${Date.now()}-${Math.random()}`,
+      name: s.name,
+      lat: s.lat,
+      lng: s.lng,
+      durationMinutes: s.durationMinutes,
+    }));
+    setStops(prev => [...prev, ...added]);
+    stopDirtyRef.current = true;
+    toast({ title: `Added ${added.length} stop${added.length > 1 ? 's' : ''}`, description: "Click Update ETA to apply and adjust speed." });
   };
 
   const initializedRouteIdRef = useRef<number | null>(null);
@@ -439,15 +482,10 @@ export default function RouteBuilder() {
       setSelectedIdx(0);
     }
 
-    if (!trafficModeRef.current) {
-      const er2 = existingRoute as any;
-      setUseCustomDuration(er2.customDurationEnabled ?? false);
-      if (er2.customDurationS) {
-        setCustomDurationMinutes(Math.round(er2.customDurationS / 60));
-      }
-    }
     const er = existingRoute as any;
     setShowSpeedPublic(er.showSpeedPublic ?? true);
+    setEtaTargetUtc(er.etaTargetUtc ?? null);
+    setEtaTimezone(er.etaTimezone ?? null);
   }, [existingRoute]);
 
   // Reset traffic mode when route changes or goes non-live
@@ -548,6 +586,8 @@ export default function RouteBuilder() {
               speedMph: data.speedMph ?? 0,
               atStopRouteStopId: data.atStopRouteStopId ?? null,
               stopDwellRemainingS: data.stopDwellRemainingS ?? null,
+              distanceTraveledM: data.distanceTraveledM ?? prev?.distanceTraveledM,
+              progressPercent: data.progressPercent ?? prev?.progressPercent,
             }));
           } else if (data.type === 'snapshot' && data.speedMph !== undefined) {
             // Partial update (e.g. pause) — update speed without moving the marker
@@ -938,8 +978,6 @@ export default function RouteBuilder() {
         polyline: polylineRef.current,
         speedProfile,
         waypoints: waypointsRef.current.map(w => ({ lat: w.lat, lng: w.lng, label: w.label })),
-        // customDurationS is sent only on create; for existing routes, use Update Speed button
-        ...(!routeId && { customDurationS: useCustomDuration && customDurationMinutes > 0 ? customDurationMinutes * 60 : null }),
       };
 
       let savedRoute;
@@ -1284,123 +1322,30 @@ export default function RouteBuilder() {
                   </label>
                 )}
 
-                <hr className="border-border/40" />
-
-                {/* Custom simulation time */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useCustomDuration}
-                    onChange={(e) => setUseCustomDuration(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
-                  />
-                  <span className="text-sm font-semibold text-foreground">Custom simulation time</span>
-                  {!trafficMode && (existingRoute as any)?.customDurationEnabled && (
-                    <span className="ml-auto text-xs font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Active</span>
-                  )}
-                </label>
-
-                {useCustomDuration && (
-                  <div className="space-y-3 animate-in fade-in slide-in-from-top-1">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="60"
-                        value={customDurationMinutes || ''}
-                        onChange={(e) => setCustomDurationMinutes(parseInt(e.target.value) || 0)}
-                        disabled={!useCustomDuration}
-                        className="w-24 px-3 py-1.5 rounded-lg border border-border bg-background focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none text-sm transition-all"
-                      />
-                      <span className="text-sm text-muted-foreground">minutes total</span>
-                    </div>
-                    <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
-                      <p className="text-xs font-bold text-amber-900 leading-snug flex gap-1.5 items-start">
-                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-px" />
-                        Warning: This will artificially scale the truck's speed to hit this exact duration.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Standalone Update Speed button — only shown for existing routes */}
-                {routeId && existingRoute && (
-                  <button
-                    onClick={async () => {
-                      setSpeedSaving(true);
-                      try {
-                        const res = await fetch(`/api/routes/${routeId}/speed`, {
-                          method: 'PATCH',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
-                          },
-                          body: JSON.stringify({
-                            truckSpeedMph: 60,
-                            customDurationS: customDurationMinutes > 0 ? customDurationMinutes * 60 : null,
-                            customDurationEnabled: useCustomDuration,
-                            showSpeedPublic,
-                          }),
-                        });
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          throw new Error(err.message || 'Failed to update speed');
-                        }
-                        toast({ title: "Settings Updated", description: "Speed settings have been saved." });
-                        await refetchRoute();
-                      } catch (err: any) {
-                        toast({ title: "Update failed", description: err?.message || "Failed to update", variant: "destructive" });
-                      } finally {
-                        setSpeedSaving(false);
-                      }
-                    }}
-                    disabled={speedSaving || !useCustomDuration}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-white hover:bg-primary/90 font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
-                  >
-                    {speedSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />}
-                    Update Speed Settings
-                  </button>
-                )}
-
-                {/* Reset to default — only shown when a custom duration is saved */}
-                {routeId && existingRoute && !trafficMode && (existingRoute as any).customDurationEnabled && (
-                  <button
-                    onClick={async () => {
-                      setSpeedSaving(true);
-                      try {
-                        const res = await fetch(`/api/routes/${routeId}/speed`, {
-                          method: 'PATCH',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
-                          },
-                          body: JSON.stringify({
-                            customDurationS: null,
-                            customDurationEnabled: false,
-                          }),
-                        });
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          throw new Error(err.message || 'Failed to reset');
-                        }
-                        toast({ title: "Speed Reset", description: "Simulation speed reset to map-based default." });
-                        setUseCustomDuration(false);
-                        setCustomDurationMinutes(30);
-                        initializedRouteIdRef.current = null;
-                        await refetchRoute();
-                      } catch (err: any) {
-                        toast({ title: "Reset failed", description: err?.message || "Failed to reset", variant: "destructive" });
-                      } finally {
-                        setSpeedSaving(false);
-                      }
-                    }}
-                    disabled={speedSaving}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border text-muted-foreground hover:bg-muted/40 font-semibold text-sm transition-colors disabled:opacity-50"
-                  >
-                    Reset to Default
-                  </button>
-                )}
               </div>
+
+              {/* ETA Widget */}
+              {!isCompleted && (
+                <div className="space-y-3 p-3.5 rounded-xl border border-border bg-card">
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1 block">
+                    Destination ETA
+                  </label>
+                  <EtaWidget
+                    endLat={end?.lat ?? null}
+                    endLng={end?.lng ?? null}
+                    distanceM={distance}
+                    estimatedDurationS={duration}
+                    stops={stops}
+                    etaTargetUtc={etaTargetUtc}
+                    etaTimezone={etaTimezone}
+                    routeStatus={existingRoute?.status ?? 'draft'}
+                    liveSnapshot={liveSnapshot}
+                    onEtaChange={handleEtaChange}
+                    onAddSuggestedStops={handleAddSuggestedStops}
+                    polyline={polyline}
+                  />
+                </div>
+              )}
             </div>
 
             <hr className="border-border/50" />
@@ -1669,6 +1614,36 @@ export default function RouteBuilder() {
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Stops ({stops.length})
                 </h3>
+                {stops.length > 0 && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 transition-colors">
+                        <Trash2 className="w-3 h-3" />
+                        Remove all
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Remove all stops?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will delete all {stops.length} stop{stops.length > 1 ? "s" : ""} from this route. This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={async () => {
+                            setStops([]);
+                            if (routeId) await syncStopsToBackend([]);
+                          }}
+                        >
+                          Remove all
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
 
               <button

@@ -10,7 +10,6 @@ import {
   Loader2,
   Mail,
   Shield,
-  AlertCircle,
   Edit,
   User,
   Building2,
@@ -83,7 +82,7 @@ export default function SuperAdmin() {
   const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
   const [orgName, setOrgName] = useState("");
   const [orgIsPaid, setOrgIsPaid] = useState(false);
-  const [orgRouteLimit, setOrgRouteLimit] = useState(0);
+  const [orgRouteLimit, setOrgRouteLimit] = useState<number | ''>(0);
 
   // Redirect if not at least an admin/manager
   if (!user || (user.role !== 'super_admin' && user.role !== 'admin')) {
@@ -217,7 +216,7 @@ export default function SuperAdmin() {
       setEditingOrg(org);
       setOrgName(org.name);
       setOrgIsPaid(org.isPaid);
-      setOrgRouteLimit(org.routeLimit);
+      setOrgRouteLimit(org.routeLimit ?? 0);
     } else {
       setEditingOrg(null);
       setOrgName(""); setOrgIsPaid(false); setOrgRouteLimit(0);
@@ -228,9 +227,9 @@ export default function SuperAdmin() {
   const handleSaveOrg = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingOrg) {
-      updateOrgMutation.mutate({ id: editingOrg.id, data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit } });
+      updateOrgMutation.mutate({ id: editingOrg.id, data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit === '' ? 0 : orgRouteLimit } });
     } else {
-      createOrgMutation.mutate({ data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit } });
+      createOrgMutation.mutate({ data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit === '' ? 0 : orgRouteLimit } });
     }
   };
 
@@ -840,7 +839,13 @@ export default function SuperAdmin() {
               <input
                 type="number"
                 value={orgRouteLimit}
-                onChange={(e) => setOrgRouteLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { setOrgRouteLimit(''); return; }
+                  const n = parseInt(raw, 10);
+                  if (!isNaN(n)) setOrgRouteLimit(Math.max(0, n));
+                }}
+                onBlur={() => { if (orgRouteLimit === '') setOrgRouteLimit(0); }}
                 min={0}
                 className="w-full px-4 py-3 bg-background border-2 border-border/50 rounded-xl focus:border-primary outline-none transition-all"
               />
