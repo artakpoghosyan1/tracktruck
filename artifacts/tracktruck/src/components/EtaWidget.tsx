@@ -240,7 +240,7 @@ export function EtaWidget({
     : distanceM;
 
   const suggestion = useMemo(() => {
-    if (!etaUtcMoment || !isFuture || effectiveDistanceM <= 0 || estimatedDurationS <= 0) return null;
+    if (!etaUtcMoment || !isFuture || estimatedDurationS <= 0) return null;
     // No room to place stops ahead of the truck when it's past 94% of the route
     const progressFraction = isInProgress && liveSnapshot?.progressPercent != null
       ? liveSnapshot.progressPercent / 100 : 0;
@@ -251,17 +251,29 @@ export function EtaWidget({
       .filter(st => st.stopType === "pacing")
       .reduce((s, st) => s + st.durationMinutes * 60, 0);
 
-    // Natural speed derived from the route's estimated travel time
-    const naturalSpeedMph = (distanceM / 1609.34) / (estimatedDurationS / 3600);
-    // Time to cover remaining distance at natural speed
-    const remainingNaturalTravelTimeS = (effectiveDistanceM / 1609.34) / naturalSpeedMph * 3600;
-
     const requiredMovingTimeS = etaDurationS - existingPacingDwellS;
     if (requiredMovingTimeS <= 0) return null;
-    const requiredSpeedMph = (effectiveDistanceM / 1609.34) / (requiredMovingTimeS / 3600);
 
-    // Only suggest if ETA forces the truck meaningfully below natural speed
-    if (requiredSpeedMph >= naturalSpeedMph * 0.9) return null;
+    // Remaining natural travel time: use distance ratio when available, otherwise fraction of total
+    const remainingFraction = isInProgress
+      ? (distanceM > 0 && liveSnapshot?.distanceTraveledM != null
+          ? Math.max(0, (distanceM - liveSnapshot.distanceTraveledM) / distanceM)
+          : Math.max(0, 1 - progressFraction))
+      : 1;
+    const remainingNaturalTravelTimeS = remainingFraction * estimatedDurationS;
+
+    // Speed-based check when distance data is available; time-based fallback otherwise
+    let requiredSpeedMph: number | null = null;
+    let naturalSpeedMph: number | null = null;
+    if (distanceM > 0 && effectiveDistanceM > 0) {
+      naturalSpeedMph = (distanceM / 1609.34) / (estimatedDurationS / 3600);
+      requiredSpeedMph = (effectiveDistanceM / 1609.34) / (requiredMovingTimeS / 3600);
+      // Only suggest if ETA forces the truck meaningfully below natural speed
+      if (requiredSpeedMph >= naturalSpeedMph * 0.9) return null;
+    } else {
+      // No usable distance data — check that ETA meaningfully exceeds natural remaining time
+      if (requiredMovingTimeS >= remainingNaturalTravelTimeS * 0.9) return null;
+    }
 
     // Extra pacing dwell needed so the truck can keep traveling at natural speed
     const additionalDwellNeeded = etaDurationS - existingPacingDwellS - remainingNaturalTravelTimeS;
@@ -272,10 +284,10 @@ export function EtaWidget({
     return {
       stopCount,
       dwellPerStopMin,
-      requiredSpeedMph: Math.round(requiredSpeedMph),
-      naturalSpeedMph: Math.round(naturalSpeedMph),
+      requiredSpeedMph: requiredSpeedMph != null ? Math.round(requiredSpeedMph) : null,
+      naturalSpeedMph: naturalSpeedMph != null ? Math.round(naturalSpeedMph) : null,
     };
-  }, [etaUtcMoment, isFuture, effectiveDistanceM, distanceM, estimatedDurationS, stops, isInProgress, liveSnapshot?.progressPercent]);
+  }, [etaUtcMoment, isFuture, effectiveDistanceM, distanceM, estimatedDurationS, stops, isInProgress, liveSnapshot?.progressPercent, liveSnapshot?.distanceTraveledM]);
 
   const handleSaveEta = () => {
     if (!etaUtcMoment || !isFuture) return;

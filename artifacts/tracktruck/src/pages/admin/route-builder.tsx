@@ -231,7 +231,6 @@ export default function RouteBuilder() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [showAddWaypoint, setShowAddWaypoint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [speedSaving, setSpeedSaving] = useState(false);
   const [trafficMode, setTrafficMode] = useState(false);
   const trafficModeRef = useRef(false);
   const [trafficLoading, setTrafficLoading] = useState(false);
@@ -269,6 +268,7 @@ export default function RouteBuilder() {
 
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
   const [routeChangeMode, setRouteChangeMode] = useState(false);
+  const routeChangeModeRef = useRef(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Speed visibility for public tracking page
@@ -504,10 +504,15 @@ export default function RouteBuilder() {
     }
   }, [existingRoute, liveSnapshot]);
 
-  // Restore the saved route as a single option
+  // Keep ref in sync so effects can read current value without stale closures
+  useEffect(() => { routeChangeModeRef.current = routeChangeMode; }, [routeChangeMode]);
+
+  // Restore the saved route as a single option.
+  // Skip route geometry/duration while user is actively changing the route —
+  // a WS-triggered refetch would otherwise overwrite the freshly computed options.
   useEffect(() => {
     if (!existingRoute) return;
-    if (existingRoute.polyline?.length) {
+    if (existingRoute.polyline?.length && !routeChangeModeRef.current) {
       setRouteOptions([{
         polyline: existingRoute.polyline,
         distanceM: existingRoute.distanceM || 0,
