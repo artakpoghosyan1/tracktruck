@@ -5,6 +5,7 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RouteStopStopType } from './routeStopStopType';
 
 export interface RouteStop {
   id: number;
@@ -14,5 +15,6 @@ export interface RouteStop {
   lng: number;
   durationMinutes: number;
   sortOrder: number;
+  stopType: RouteStopStopType;
   createdAt: Date;
 }

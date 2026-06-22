@@ -46,6 +46,7 @@ interface Stop {
   lat: number;
   lng: number;
   durationMinutes: number;
+  stopType?: "stop" | "pacing";
   dbId?: number;
 }
 
@@ -155,25 +156,31 @@ function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuratio
   countdownSec: number | null;
 }) {
   const isCurrentStop = stop.dbId != null && stop.dbId === atStopRouteStopId;
+  const isPacing = stop.stopType === "pacing";
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 bg-muted/40 border border-border/60 rounded-xl p-3 group transition-all ${isCurrentStop ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : ''}`}>
+    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 rounded-xl p-3 group transition-all border ${isCurrentStop ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : isPacing ? 'bg-amber-50/30 border-amber-200/60' : 'bg-muted/40 border-border/60'}`}>
       <div className="flex gap-2 items-center">
         <div {...attributes} {...listeners} className="cursor-grab p-1 text-muted-foreground hover:text-foreground shrink-0">
           <GripVertical className="w-4 h-4" />
         </div>
-        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-500 text-amber-500 animate-pulse' : 'border-primary text-primary'}`}>
+        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-500 text-amber-500 animate-pulse' : isPacing ? 'border-amber-400 text-amber-500' : 'border-primary text-primary'}`}>
           {index + 1}
         </div>
         <div className="flex-1 min-w-0 space-y-1">
-          <input
-            type="text"
-            value={stop.name}
-            onChange={(e) => onChangeName(stop.id, e.target.value)}
-            className="w-full bg-transparent font-medium outline-none text-sm placeholder:text-muted-foreground truncate"
-            placeholder="Stop name"
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={stop.name}
+              onChange={(e) => onChangeName(stop.id, e.target.value)}
+              className="flex-1 min-w-0 bg-transparent font-medium outline-none text-sm placeholder:text-muted-foreground truncate"
+              placeholder="Stop name"
+            />
+            {isPacing && (
+              <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">pacing</span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="w-3 h-3 shrink-0" />
             <input
@@ -296,6 +303,25 @@ export default function RouteBuilder() {
   const routeLocked = (isLiveRoute && !routeChangeMode) || isCompleted;
   const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
   const liveSpeedMph = liveSnapshot?.speedMph ?? null;
+
+  // Remaining time: ETA-based if ETA is set, otherwise estimated from natural pace + progress
+  const remainingTimeS = (() => {
+    if (!isLiveRoute) return null;
+    if (etaTargetUtc) {
+      const r = (new Date(etaTargetUtc).getTime() - Date.now()) / 1000;
+      return r > 0 ? Math.round(r) : null;
+    }
+    const progress = liveSnapshot?.progressPercent;
+    if (progress == null || duration <= 0) return null;
+    return Math.round(duration * (1 - progress / 100));
+  })();
+  const remainingLabel = (() => {
+    if (remainingTimeS == null || remainingTimeS < 0) return null;
+    if (remainingTimeS < 60) return "<1m";
+    const h = Math.floor(remainingTimeS / 3600);
+    const m = Math.round((remainingTimeS % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  })();
 
   const { user } = useAppStore();
   const isUser = user?.role === 'user';
@@ -425,17 +451,25 @@ export default function RouteBuilder() {
     }
   };
 
-  const handleAddSuggestedStops = (newStops: { name: string; lat: number; lng: number; durationMinutes: number }[]) => {
+  const handleAddSuggestedStops = async (newStops: { name: string; lat: number; lng: number; durationMinutes: number; stopType?: "stop" | "pacing" }[]) => {
     const added = newStops.map(s => ({
       id: `client-${Date.now()}-${Math.random()}`,
       name: s.name,
       lat: s.lat,
       lng: s.lng,
       durationMinutes: s.durationMinutes,
+      stopType: s.stopType ?? "pacing" as const,
     }));
-    setStops(prev => [...prev, ...added]);
-    stopDirtyRef.current = true;
-    toast({ title: `Added ${added.length} stop${added.length > 1 ? 's' : ''}`, description: "Click Update ETA to apply and adjust speed." });
+    const nextStops = [...stopsRef.current, ...added];
+    stopsRef.current = nextStops;
+    setStops(nextStops);
+    stopDirtyRef.current = false;
+    // Sync stops to DB — the server invalidates the simulation cache so the engine
+    // recalculates speedMultiplier with the new stop dwells on its next tick.
+    const synced = await syncStopsToBackend(nextStops);
+    stopsRef.current = synced;
+    setStops(synced);
+    toast({ title: `${added.length} stop${added.length > 1 ? 's' : ''} added`, description: "Speed adjusted to match natural pace." });
   };
 
   const initializedRouteIdRef = useRef<number | null>(null);
@@ -457,6 +491,7 @@ export default function RouteBuilder() {
       lng: s.lng,
       lat: s.lat,
       durationMinutes: s.durationMinutes,
+      stopType: ((s as any).stopType === "pacing" ? "pacing" : "stop") as "stop" | "pacing",
       sortOrder: s.sortOrder,
     })));
     setWaypoints(((existingRoute as any).waypoints ?? []).map((w: { lat: number; lng: number; label: string }, i: number) => ({
@@ -550,6 +585,8 @@ export default function RouteBuilder() {
               speedMph: data.snapshot.speedMph ?? 0,
               atStopRouteStopId: data.snapshot.atStopRouteStopId ?? null,
               stopDwellRemainingS: data.snapshot.stopDwellRemainingS ?? null,
+              distanceTraveledM: data.snapshot.distanceTraveledM ?? undefined,
+              progressPercent: data.snapshot.progressPercent ?? undefined,
             });
           }
         })
@@ -800,7 +837,7 @@ export default function RouteBuilder() {
     }
   }, []);
 
-  type SavedStopRow = { id: number; name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number };
+  type SavedStopRow = { id: number; name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number; stopType?: "stop" | "pacing" };
 
   /** Bulk-replace stops and sync returned DB ids back into local state. */
   const syncStopsToBackend = useCallback(async (nextStops: Stop[]): Promise<Stop[]> => {
@@ -820,6 +857,7 @@ export default function RouteBuilder() {
             lng: s.lng,
             durationMinutes: Math.max(1, s.durationMinutes || 5),
             sortOrder: i,
+            stopType: s.stopType ?? "stop",
           })),
         }),
       });
@@ -837,6 +875,7 @@ export default function RouteBuilder() {
           dbId: saved.id,
           id: String(saved.id),
           durationMinutes: saved.durationMinutes,
+          stopType: saved.stopType ?? s.stopType ?? "stop",
         };
       });
     } catch (err: unknown) {
@@ -998,6 +1037,7 @@ export default function RouteBuilder() {
             lng: s.lng,
             durationMinutes: Math.max(1, s.durationMinutes || 5),
             sortOrder: i,
+            stopType: s.stopType ?? "stop",
           })),
         }),
       });
@@ -1010,7 +1050,7 @@ export default function RouteBuilder() {
         const synced = stopsRef.current.map((s, i) => {
           const saved = bulkData.stops![i];
           if (!saved) return s;
-          return { ...s, dbId: saved.id, id: String(saved.id), durationMinutes: saved.durationMinutes };
+          return { ...s, dbId: saved.id, id: String(saved.id), durationMinutes: saved.durationMinutes, stopType: saved.stopType ?? s.stopType ?? "stop" };
         });
         setStops(synced);
         stopsRef.current = synced;
@@ -1119,6 +1159,15 @@ export default function RouteBuilder() {
               <Gauge className="w-4 h-4 text-emerald-600" />
               <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedMph}</span>
               <span className="text-xs text-emerald-600">mph</span>
+            </div>
+          )}
+
+          {/* Remaining duration badge */}
+          {remainingLabel && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-bold text-blue-800 tabular-nums">{remainingLabel}</span>
+              <span className="text-xs text-blue-600">left</span>
             </div>
           )}
 
@@ -1304,22 +1353,33 @@ export default function RouteBuilder() {
 
                 {/* Traffic mode — only shown when route is live */}
                 {isLiveRoute && (
-                  <label className="flex items-center justify-between cursor-pointer py-1">
-                    <div className="flex items-center gap-2">
-                      <Car className="w-4 h-4 text-orange-500" />
-                      <span className="text-sm font-medium text-foreground">Heavy traffic</span>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={trafficMode}
-                      disabled={trafficLoading}
-                      onClick={handleTrafficToggle}
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${trafficMode ? 'bg-orange-500' : 'bg-gray-300'}`}
-                    >
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${trafficMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                    </button>
-                  </label>
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <label className={`flex items-center justify-between py-1 ${routeChangeMode ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                          <div className="flex items-center gap-2">
+                            <Car className="w-4 h-4 text-orange-500" />
+                            <span className="text-sm font-medium text-foreground">Heavy traffic</span>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={trafficMode}
+                            disabled={trafficLoading || routeChangeMode}
+                            onClick={handleTrafficToggle}
+                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 disabled:pointer-events-none ${trafficMode ? 'bg-orange-500' : 'bg-gray-300'}`}
+                          >
+                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${trafficMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          </button>
+                        </label>
+                      </TooltipTrigger>
+                      {routeChangeMode && (
+                        <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                          <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
 
               </div>
@@ -1343,6 +1403,7 @@ export default function RouteBuilder() {
                     onEtaChange={handleEtaChange}
                     onAddSuggestedStops={handleAddSuggestedStops}
                     polyline={polyline}
+                    disabled={routeChangeMode}
                   />
                 </div>
               )}
@@ -1542,27 +1603,41 @@ export default function RouteBuilder() {
                     </h3>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      if (showAddWaypoint) {
-                        // Trigger recalc + auto-save only if waypoints actually changed
-                        if (waypointDirtyRef.current) shouldSaveAfterRecalc.current = true;
-                        setShowAddWaypoint(false);
-                        setMapClick(null);
-                      } else {
-                        setShowAddWaypoint(true);
-                        setShowAddStop(false);
-                        setMapClick(null);
-                      }
-                    }}
-                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddWaypoint
-                      ? 'bg-violet-600/80 text-white hover:bg-violet-600/70 shadow-violet-200'
-                      : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-200'
-                    }`}
-                  >
-                    {showAddWaypoint ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    {showAddWaypoint ? 'Done Adding Waypoints' : 'Add Waypoint'}
-                  </button>
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={`w-full block ${routeChangeMode ? 'cursor-not-allowed' : ''}`}>
+                          <button
+                            onClick={() => {
+                              if (showAddWaypoint) {
+                                // Trigger recalc + auto-save only if waypoints actually changed
+                                if (waypointDirtyRef.current) shouldSaveAfterRecalc.current = true;
+                                setShowAddWaypoint(false);
+                                setMapClick(null);
+                              } else {
+                                setShowAddWaypoint(true);
+                                setShowAddStop(false);
+                                setMapClick(null);
+                              }
+                            }}
+                            disabled={routeChangeMode}
+                            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none ${showAddWaypoint
+                              ? 'bg-violet-600/80 text-white hover:bg-violet-600/70 shadow-violet-200'
+                              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-200'
+                            }`}
+                          >
+                            {showAddWaypoint ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                            {showAddWaypoint ? 'Done Adding Waypoints' : 'Add Waypoint'}
+                          </button>
+                        </span>
+                      </TooltipTrigger>
+                      {routeChangeMode && (
+                        <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                          <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
 
                   {showAddWaypoint && (
                     <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
@@ -1589,7 +1664,8 @@ export default function RouteBuilder() {
                               shouldSaveAfterRecalc.current = true;
                               setWaypoints(ws => ws.filter(w => w.id !== wp.id));
                             }}
-                            className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors shrink-0"
+                            disabled={routeChangeMode}
+                            className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors shrink-0 disabled:opacity-40 disabled:pointer-events-none"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1617,7 +1693,7 @@ export default function RouteBuilder() {
                 {stops.length > 0 && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <button className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 transition-colors">
+                      <button disabled={routeChangeMode} className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 transition-colors disabled:opacity-40 disabled:pointer-events-none">
                         <Trash2 className="w-3 h-3" />
                         Remove all
                       </button>
@@ -1646,28 +1722,42 @@ export default function RouteBuilder() {
                 )}
               </div>
 
-              <button
-                onClick={() => { 
-                  if (showAddStop) {
-                    const dirty = stopDirtyRef.current;
-                    stopDirtyRef.current = false;
-                    setShowAddStop(false);
-                    setHoverSnap(null);
-                    setMapClick(null);
-                    if (dirty) setTimeout(() => handleSave(false, true), 50);
-                  } else {
-                    setShowAddStop(true);
-                    setMapClick(null);
-                  }
-                }}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddStop
-                  ? 'bg-teal-600/80 text-white hover:bg-teal-600/70 shadow-teal-200'
-                  : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-200'
-                }`}
-              >
-                {showAddStop ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
-              </button>
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className={`w-full block ${routeChangeMode ? 'cursor-not-allowed' : ''}`}>
+                      <button
+                        onClick={() => {
+                          if (showAddStop) {
+                            const dirty = stopDirtyRef.current;
+                            stopDirtyRef.current = false;
+                            setShowAddStop(false);
+                            setHoverSnap(null);
+                            setMapClick(null);
+                            if (dirty) setTimeout(() => handleSave(false, true), 50);
+                          } else {
+                            setShowAddStop(true);
+                            setMapClick(null);
+                          }
+                        }}
+                        disabled={routeChangeMode}
+                        className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none ${showAddStop
+                          ? 'bg-teal-600/80 text-white hover:bg-teal-600/70 shadow-teal-200'
+                          : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-200'
+                        }`}
+                      >
+                        {showAddStop ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                        {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
+                      </button>
+                    </span>
+                  </TooltipTrigger>
+                  {routeChangeMode && (
+                    <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                      <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
 
               {showAddStop && (
                 <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 space-y-2">
@@ -1833,7 +1923,7 @@ export default function RouteBuilder() {
               {/* Stop markers */}
               {stops.map((stop, i) => (
                 <Marker key={stop.id} longitude={stop.lng} latitude={stop.lat} anchor="center">
-                  <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center text-primary shadow-lg border-2 border-primary font-bold text-xs">
+                  <div className={`w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-lg border-2 font-bold text-xs ${stop.stopType === "pacing" ? "border-amber-500 text-amber-500" : "border-primary text-primary"}`}>
                     {i + 1}
                   </div>
                 </Marker>

@@ -1,7 +1,9 @@
-import { pgTable, serial, text, integer, doublePrecision, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, doublePrecision, timestamp, pgEnum } from "drizzle-orm/pg-core";
 import { routesTable } from "./routes";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+
+export const stopTypeEnum = pgEnum("stop_type", ["stop", "pacing"]);
 
 export const routeStopsTable = pgTable("route_stops", {
   id: serial("id").primaryKey(),
@@ -11,6 +13,7 @@ export const routeStopsTable = pgTable("route_stops", {
   lng: doublePrecision("lng").notNull(),
   durationMinutes: doublePrecision("duration_minutes").notNull().default(5),
   sortOrder: integer("sort_order").notNull().default(0),
+  stopType: stopTypeEnum("stop_type").notNull().default("stop"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

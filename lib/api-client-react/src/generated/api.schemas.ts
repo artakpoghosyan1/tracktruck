@@ -175,6 +175,14 @@ export type RouteDetailWaypointsItem = {
   label: string;
 };
 
+export type RouteStopStopType = typeof RouteStopStopType[keyof typeof RouteStopStopType];
+
+
+export const RouteStopStopType = {
+  stop: 'stop',
+  pacing: 'pacing',
+} as const;
+
 export interface RouteStop {
   id: number;
   routeId: number;
@@ -183,6 +191,7 @@ export interface RouteStop {
   lng: number;
   durationMinutes: number;
   sortOrder: number;
+  stopType: RouteStopStopType;
   createdAt: string;
 }
 
@@ -217,12 +226,21 @@ export interface PaginatedRoutes {
   pageSize: number;
 }
 
+export type CreateStopRequestStopType = typeof CreateStopRequestStopType[keyof typeof CreateStopRequestStopType];
+
+
+export const CreateStopRequestStopType = {
+  stop: 'stop',
+  pacing: 'pacing',
+} as const;
+
 export interface CreateStopRequest {
   name: string;
   lat: number;
   lng: number;
   durationMinutes?: number;
   sortOrder?: number;
+  stopType?: CreateStopRequestStopType;
 }
 
 export interface UpdateStopRequest {

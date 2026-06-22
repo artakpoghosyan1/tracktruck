@@ -229,7 +229,7 @@ export const GetRouteParams = zod.object({
 export const getRouteResponsePolylineItemMin = 2;
 export const getRouteResponsePolylineItemMax = 2;
 
-
+export const getRouteResponseStopsItemStopTypeDefault = `stop`;
 
 export const GetRouteResponse = zod.object({
   "id": zod.number(),
@@ -259,6 +259,7 @@ export const GetRouteResponse = zod.object({
   "lng": zod.number(),
   "durationMinutes": zod.number(),
   "sortOrder": zod.number(),
+  "stopType": zod.enum(['stop', 'pacing']).default(getRouteResponseStopsItemStopTypeDefault),
   "createdAt": zod.date()
 })),
   "waypoints": zod.array(zod.object({
@@ -306,7 +307,7 @@ export const UpdateRouteBody = zod.object({
 export const updateRouteResponsePolylineItemMin = 2;
 export const updateRouteResponsePolylineItemMax = 2;
 
-
+export const updateRouteResponseStopsItemStopTypeDefault = `stop`;
 
 export const UpdateRouteResponse = zod.object({
   "id": zod.number(),
@@ -336,6 +337,7 @@ export const UpdateRouteResponse = zod.object({
   "lng": zod.number(),
   "durationMinutes": zod.number(),
   "sortOrder": zod.number(),
+  "stopType": zod.enum(['stop', 'pacing']).default(updateRouteResponseStopsItemStopTypeDefault),
   "createdAt": zod.date()
 })),
   "waypoints": zod.array(zod.object({
@@ -369,13 +371,15 @@ export const CreateStopParams = zod.object({
 })
 
 export const createStopBodyDurationMinutesDefault = 5;
+export const createStopBodyStopTypeDefault = `stop`;
 
 export const CreateStopBody = zod.object({
   "name": zod.string(),
   "lat": zod.number(),
   "lng": zod.number(),
   "durationMinutes": zod.number().default(createStopBodyDurationMinutesDefault),
-  "sortOrder": zod.number().optional()
+  "sortOrder": zod.number().optional(),
+  "stopType": zod.enum(['stop', 'pacing']).default(createStopBodyStopTypeDefault)
 })
 
 
@@ -395,6 +399,8 @@ export const UpdateStopBody = zod.object({
   "sortOrder": zod.number().optional()
 })
 
+export const updateStopResponseStopTypeDefault = `stop`;
+
 export const UpdateStopResponse = zod.object({
   "id": zod.number(),
   "routeId": zod.number(),
@@ -403,6 +409,7 @@ export const UpdateStopResponse = zod.object({
   "lng": zod.number(),
   "durationMinutes": zod.number(),
   "sortOrder": zod.number(),
+  "stopType": zod.enum(['stop', 'pacing']).default(updateStopResponseStopTypeDefault),
   "createdAt": zod.date()
 })
 

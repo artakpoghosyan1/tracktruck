@@ -1443,6 +1443,10 @@ components:
           type: number
         sortOrder:
           type: integer
+        stopType:
+          type: string
+          enum: [stop, pacing]
+          default: stop
         createdAt:
           type: string
           format: date-time
@@ -1454,6 +1458,7 @@ components:
         - lng
         - durationMinutes
         - sortOrder
+        - stopType
         - createdAt
 
     CreateStopRequest:
@@ -1470,6 +1475,10 @@ components:
           default: 5
         sortOrder:
           type: integer
+        stopType:
+          type: string
+          enum: [stop, pacing]
+          default: stop
       required:
         - name
         - lat

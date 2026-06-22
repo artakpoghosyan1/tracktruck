@@ -39,6 +39,7 @@ interface StopEntry {
   durationS: number;
   name: string;
   routeStopId?: number;
+  isPacing?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +297,7 @@ async function warmRouteCache(routeId: number, truckSpeedMph: number): Promise<v
     durationS: s.durationMinutes * 60,
     name: s.name,
     routeStopId: s.id,
+    isPacing: s.stopType === "pacing",
   }));
   let sortedStops = [...realStops, ...buildIntersectionStops(polyline, speedProfile, truckSpeedMph, truckDistHint)]
     .sort((a, b) => a.distanceAlongPolylineM - b.distanceAlongPolylineM);
@@ -379,16 +381,26 @@ async function tick() {
 
     cache.lastAccessedTick = tickCount;
 
-    const etaDurationS = (route.etaTargetUtc && simState.startedAt)
-      ? (route.etaTargetUtc.getTime() - simState.startedAt.getTime()) / 1000
-      : null;
-    // Subtract total user-stop dwell time so the multiplier governs only moving time
+    // Only pacing stops count toward ETA speed multiplier — regular stops are intentional
+    // user waypoints and should not influence how fast the truck moves to hit the target time.
     const totalStopDwellS = cache.sortedStops
-      .filter(s => s.routeStopId != null)
+      .filter(s => s.isPacing)
       .reduce((sum, s) => sum + s.durationS, 0);
-    const etaMovingTimeS = etaDurationS != null ? etaDurationS - totalStopDwellS : null;
-    const speedMultiplier = (etaMovingTimeS && etaMovingTimeS > 0 && route.estimatedDurationS > 0)
-      ? route.estimatedDurationS / etaMovingTimeS : 1.0;
+    // Use remaining distance/time (relative to nowMs) so that resume resetting
+    // startedAt to nowMs never inflates the multiplier. Both values shrink at the
+    // same rate while the truck moves, keeping the ratio — and therefore the speed
+    // multiplier — stable across resumes.
+    const currentDistM = Math.max(lastKnownDistM.get(route.id) ?? 0, simState.distanceTraveledM ?? 0);
+    const remainingDistM = Math.max(0, (route.distanceM ?? 0) - currentDistM);
+    const remainingNaturalS = (route.distanceM ?? 0) > 0 && route.estimatedDurationS > 0
+      ? route.estimatedDurationS * (remainingDistM / route.distanceM!)
+      : (route.estimatedDurationS ?? 0);
+    const remainingToEtaS = route.etaTargetUtc
+      ? (route.etaTargetUtc.getTime() - nowMs) / 1000
+      : null;
+    const remainingEtaMovingTimeS = remainingToEtaS != null ? remainingToEtaS - totalStopDwellS : null;
+    const speedMultiplier = (remainingNaturalS > 0 && remainingEtaMovingTimeS != null && remainingEtaMovingTimeS > 0)
+      ? remainingNaturalS / remainingEtaMovingTimeS : 1.0;
 
     // When a stop is deleted while the truck is waiting at it, reset effectiveElapsedMs
     // so the truck continues from that position rather than jumping forward.

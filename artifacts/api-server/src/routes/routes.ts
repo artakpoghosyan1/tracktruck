@@ -227,6 +227,7 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
       lng: s.lng,
       durationMinutes: s.durationMinutes,
       sortOrder: s.sortOrder,
+      stopType: s.stopType,
       createdAt: s.createdAt.toISOString(),
     })),
     updateCount: route.updateCount,
@@ -623,7 +624,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
   }
 
   const { stops } = req.body as {
-    stops: { name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number }[];
+    stops: { name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number; stopType?: string }[];
   };
 
   const [{ oldCount }] = await db
@@ -645,6 +646,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
         lng: s.lng,
         durationMinutes: Math.max(1, s.durationMinutes ?? 5),
         sortOrder: s.sortOrder ?? i,
+        stopType: (s.stopType === "pacing" ? "pacing" : "stop") as "stop" | "pacing",
       }));
       insertedStops = await tx.insert(routeStopsTable).values(values).returning();
     }
@@ -680,6 +682,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
       lng: s.lng,
       durationMinutes: s.durationMinutes,
       sortOrder: s.sortOrder,
+      stopType: s.stopType,
     })),
   });
 });

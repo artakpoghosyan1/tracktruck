@@ -2,6 +2,12 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 import { format } from "date-fns";
 import { Clock, AlertTriangle, X, MapPin } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Stop {
   id: string;
@@ -10,6 +16,7 @@ interface Stop {
   lng: number;
   durationMinutes: number;
   dbId?: number;
+  stopType?: string;
 }
 
 interface LiveSnapshot {
@@ -23,6 +30,7 @@ interface SuggestedStop {
   lat: number;
   lng: number;
   durationMinutes: number;
+  stopType: "pacing";
 }
 
 interface EtaWidgetProps {
@@ -36,8 +44,9 @@ interface EtaWidgetProps {
   routeStatus: string;
   liveSnapshot?: LiveSnapshot | null;
   onEtaChange: (etaUtc: string | null, timezone: string | null) => void;
-  onAddSuggestedStops: (stops: SuggestedStop[]) => void;
+  onAddSuggestedStops: (stops: SuggestedStop[]) => void | Promise<void>;
   polyline: number[][];
+  disabled?: boolean;
 }
 
 const US_TIMEZONES = [
@@ -50,7 +59,6 @@ const US_TIMEZONES = [
   { value: "Pacific/Honolulu", label: "Hawaii Time" },
 ];
 
-const MIN_REALISTIC_SPEED_MPH = 50;
 const MAX_SINGLE_STOP_DWELL_S = 7200; // 2 hours
 
 function interpolatePolylinePoint(polyline: number[][], fraction: number): { lat: number; lng: number } {
@@ -94,6 +102,7 @@ export function EtaWidget({
   onEtaChange,
   onAddSuggestedStops,
   polyline,
+  disabled = false,
 }: EtaWidgetProps) {
   const [detectedTimezone, setDetectedTimezone] = useState<string | null>(null);
   const [detectedLabel, setDetectedLabel] = useState<string>("");
@@ -105,6 +114,14 @@ export function EtaWidget({
   const [isDismissed, setIsDismissed] = useState(false);
   const [isLoadingTz, setIsLoadingTz] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the last "timezone:duration" key used for auto-prefill.
+  // Re-prefills when timezone changes (detection) OR route duration changes (recalculation).
+  // Does NOT re-prefill on every live snapshot tick, so user edits are preserved.
+  const prefillKeyRef = useRef<string | null>(null);
+
+  // Computed early so it can be used in effects below
+  // (selectedTimezone is set explicitly; detectedTimezone is set after fetch)
+  const activeTimezone = selectedTimezone || detectedTimezone || "America/New_York";
 
   // Convert 12h components to 24h "HH:mm" string for fromZonedTime
   const timeValue = (() => {
@@ -116,27 +133,46 @@ export function EtaWidget({
     return `${String(h24).padStart(2, "0")}:${minuteValue}`;
   })();
 
-  // Initialize from existing ETA
+  // Shared helper: apply a UTC date to the 12h form fields in the given timezone
+  const applyDateToForm = (date: Date, tz: string) => {
+    try {
+      const localStr = formatInTimeZone(date, tz, "yyyy-MM-dd HH:mm");
+      const [d, t] = localStr.split(" ");
+      setDateValue(d ?? format(new Date(), "yyyy-MM-dd"));
+      if (t) {
+        const [hStr, mStr] = t.split(":");
+        const h24 = parseInt(hStr);
+        const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
+        setHourValue(String(h12));
+        setMinuteValue(mStr ?? "00");
+        setAmpmValue(h24 >= 12 ? "PM" : "AM");
+      }
+    } catch { }
+  };
+
+  // Initialize form from saved ETA, or auto-prefill with estimated natural arrival.
+  // prefillKeyRef ("tz:durationS") prevents overwriting user edits on live snapshot ticks
+  // while still re-prefilling when the timezone is detected or the route is recalculated.
   useEffect(() => {
     if (etaTargetUtc && etaTimezone) {
       setSelectedTimezone(etaTimezone);
-      try {
-        const localStr = formatInTimeZone(new Date(etaTargetUtc), etaTimezone, "yyyy-MM-dd HH:mm");
-        const [d, t] = localStr.split(" ");
-        setDateValue(d ?? format(new Date(), "yyyy-MM-dd"));
-        if (t) {
-          const [hStr, mStr] = t.split(":");
-          const h24 = parseInt(hStr);
-          const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
-          setHourValue(String(h12));
-          setMinuteValue(mStr ?? "00");
-          setAmpmValue(h24 >= 12 ? "PM" : "AM");
-        }
-      } catch {
-        // ignore parse errors
-      }
+      applyDateToForm(new Date(etaTargetUtc), etaTimezone);
+      prefillKeyRef.current = null; // allow re-prefill if ETA is later cleared
+      return;
     }
-  }, [etaTargetUtc, etaTimezone]);
+    // No saved ETA — auto-prefill with natural estimated arrival in destination timezone
+    if (!activeTimezone || estimatedDurationS <= 0) return;
+    const key = `${activeTimezone}:${estimatedDurationS}`;
+    if (prefillKeyRef.current === key) return;
+    prefillKeyRef.current = key;
+
+    const remainingNaturalS = isInProgress && liveSnapshot?.distanceTraveledM != null && distanceM > 0
+      ? estimatedDurationS * Math.max(0, distanceM - liveSnapshot.distanceTraveledM) / distanceM
+      : estimatedDurationS;
+    const totalStopDwellS = stops.reduce((sum, s) => sum + s.durationMinutes * 60, 0);
+    applyDateToForm(new Date(Date.now() + (remainingNaturalS + totalStopDwellS) * 1000), activeTimezone);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [etaTargetUtc, etaTimezone, activeTimezone, estimatedDurationS]);
 
   // Fetch timezone when endpoint changes
   useEffect(() => {
@@ -182,8 +218,6 @@ export function EtaWidget({
     prevStopCountRef.current = stops.length;
   }, [stops.length]);
 
-  const activeTimezone = selectedTimezone || detectedTimezone || "America/New_York";
-
   const etaUtcMoment = useMemo(() => {
     if (!dateValue || !timeValue || !activeTimezone) return null;
     try {
@@ -206,25 +240,42 @@ export function EtaWidget({
     : distanceM;
 
   const suggestion = useMemo(() => {
-    if (!etaUtcMoment || !isFuture || effectiveDistanceM <= 0) return null;
+    if (!etaUtcMoment || !isFuture || effectiveDistanceM <= 0 || estimatedDurationS <= 0) return null;
+    // No room to place stops ahead of the truck when it's past 94% of the route
+    const progressFraction = isInProgress && liveSnapshot?.progressPercent != null
+      ? liveSnapshot.progressPercent / 100 : 0;
+    if (isInProgress && progressFraction >= 0.94) return null;
     const etaDurationS = (etaUtcMoment.getTime() - Date.now()) / 1000;
-    const existingDwellS = stops.reduce((s, st) => s + st.durationMinutes * 60, 0);
-    const requiredMovingTimeS = etaDurationS - existingDwellS;
+    // Only count pacing stops — regular stops are user waypoints and don't affect ETA speed
+    const existingPacingDwellS = stops
+      .filter(st => st.stopType === "pacing")
+      .reduce((s, st) => s + st.durationMinutes * 60, 0);
+
+    // Natural speed derived from the route's estimated travel time
+    const naturalSpeedMph = (distanceM / 1609.34) / (estimatedDurationS / 3600);
+    // Time to cover remaining distance at natural speed
+    const remainingNaturalTravelTimeS = (effectiveDistanceM / 1609.34) / naturalSpeedMph * 3600;
+
+    const requiredMovingTimeS = etaDurationS - existingPacingDwellS;
     if (requiredMovingTimeS <= 0) return null;
     const requiredSpeedMph = (effectiveDistanceM / 1609.34) / (requiredMovingTimeS / 3600);
-    if (requiredSpeedMph >= MIN_REALISTIC_SPEED_MPH) return null;
 
-    const minMovingTimeS = (effectiveDistanceM / 1609.34) / MIN_REALISTIC_SPEED_MPH * 3600;
-    const additionalDwellNeeded = etaDurationS - existingDwellS - minMovingTimeS;
-    if (additionalDwellNeeded <= 0) return null;
+    // Only suggest if ETA forces the truck meaningfully below natural speed
+    if (requiredSpeedMph >= naturalSpeedMph * 0.9) return null;
+
+    // Extra pacing dwell needed so the truck can keep traveling at natural speed
+    const additionalDwellNeeded = etaDurationS - existingPacingDwellS - remainingNaturalTravelTimeS;
+    if (additionalDwellNeeded < 60) return null;
 
     const stopCount = Math.max(1, Math.ceil(additionalDwellNeeded / MAX_SINGLE_STOP_DWELL_S));
     const dwellPerStopMin = Math.ceil(additionalDwellNeeded / stopCount / 60);
-    const currentSpeedMph = isInProgress && liveSnapshot?.speedMph != null && liveSnapshot.speedMph > 0
-      ? Math.round(liveSnapshot.speedMph)
-      : null;
-    return { stopCount, dwellPerStopMin, requiredSpeedMph: Math.round(requiredSpeedMph * 10) / 10, currentSpeedMph };
-  }, [etaUtcMoment, isFuture, effectiveDistanceM, stops, isInProgress, liveSnapshot?.speedMph]);
+    return {
+      stopCount,
+      dwellPerStopMin,
+      requiredSpeedMph: Math.round(requiredSpeedMph),
+      naturalSpeedMph: Math.round(naturalSpeedMph),
+    };
+  }, [etaUtcMoment, isFuture, effectiveDistanceM, distanceM, estimatedDurationS, stops, isInProgress, liveSnapshot?.progressPercent]);
 
   const handleSaveEta = () => {
     if (!etaUtcMoment || !isFuture) return;
@@ -242,16 +293,52 @@ export function EtaWidget({
 
   const handleAddSuggestedStops = () => {
     if (!suggestion || polyline.length < 2) return;
+
+    const currentFraction = isInProgress && liveSnapshot?.progressPercent != null
+      ? liveSnapshot.progressPercent / 100
+      : 0;
+    // Always start ahead of the truck; end near (but not at) the destination.
+    const startFraction = currentFraction + 0.05;
+    const endFraction = Math.min(Math.max(startFraction + 0.05, 0.93), 0.99);
+    if (startFraction >= endFraction) return;
+
+    // Cap stop count so stops aren't crowded: each stop needs at least 5% of total
+    // route distance (or 1km) of breathing room.
+    const rangeDistanceM = (endFraction - startFraction) * distanceM;
+    const minSpacingM = Math.max(distanceM * 0.05, 1000);
+    const maxStopsBySpace = Math.max(1, Math.floor(rangeDistanceM / minSpacingM));
+    const stopCount = Math.min(suggestion.stopCount, maxStopsBySpace);
+
+    // Recompute dwell using the actual stop count at click time (avoids stale useMemo
+    // Date.now() inflating totalStopDwellS and pushing speedMultiplier above 1.0).
+    let dwellPerStopMin = Math.ceil((suggestion.stopCount * suggestion.dwellPerStopMin) / stopCount);
+    if (etaUtcMoment) {
+      const freshEtaDurationS = (etaUtcMoment.getTime() - Date.now()) / 1000;
+      if (freshEtaDurationS > 0) {
+        // Only pacing stop dwell counts toward the speed multiplier
+        const existingPacingDwellS = stops
+          .filter(st => st.stopType === "pacing")
+          .reduce((s, st) => s + (st.durationMinutes ?? 0) * 60, 0);
+        const freshRemainingNaturalS = distanceM > 0
+          ? estimatedDurationS * (effectiveDistanceM / distanceM)
+          : estimatedDurationS;
+        const freshAdditionalDwell = Math.max(0, freshEtaDurationS - existingPacingDwellS - freshRemainingNaturalS);
+        // Use floor so actual dwell never exceeds what's needed (prevents speedMultiplier > 1.0).
+        const computed = Math.floor(freshAdditionalDwell / stopCount / 60);
+        if (computed >= 1) dwellPerStopMin = computed;
+      }
+    }
+
     const suggestedStops: SuggestedStop[] = [];
-    for (let i = 0; i < suggestion.stopCount; i++) {
-      // Evenly space stops between 5% and 95% along the polyline
-      const fraction = 0.05 + (0.90 / (suggestion.stopCount + 1)) * (i + 1);
+    for (let i = 0; i < stopCount; i++) {
+      const fraction = startFraction + (endFraction - startFraction) / (stopCount + 1) * (i + 1);
       const pos = interpolatePolylinePoint(polyline, fraction);
       suggestedStops.push({
-        name: `Stop ${i + 1}`,
+        name: `Pacing Stop ${i + 1}`,
         lat: pos.lat,
         lng: pos.lng,
-        durationMinutes: suggestion.dwellPerStopMin,
+        durationMinutes: dwellPerStopMin,
+        stopType: "pacing",
       });
     }
     onAddSuggestedStops(suggestedStops);
@@ -259,6 +346,9 @@ export function EtaWidget({
 
   const tzLabel = US_TIMEZONES.find((tz) => tz.value === activeTimezone)?.label ?? detectedLabel ?? activeTimezone;
   const hasEta = !!etaTargetUtc;
+  const isDirty = hasEta
+    ? (etaUtcMoment?.toISOString() !== etaTargetUtc || activeTimezone !== etaTimezone)
+    : (!!etaUtcMoment && isFuture);
 
   return (
     <div className="space-y-3">
@@ -333,9 +423,12 @@ export function EtaWidget({
               Duration: <span className="font-semibold text-foreground">
                 {Math.floor(tripDurationHours)}h {Math.round((tripDurationHours % 1) * 60)}m
               </span>
-              {estimatedDurationS > 0 && (
-                <span className="text-muted-foreground">(natural: {Math.round(estimatedDurationS / 60)}min)</span>
-              )}
+              {estimatedDurationS > 0 && (() => {
+                const h = Math.floor(estimatedDurationS / 3600);
+                const m = Math.round((estimatedDurationS % 3600) / 60);
+                const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+                return <span className="text-muted-foreground">(natural: {label})</span>;
+              })()}
             </>
           ) : (
             "Arrival time must be in the future."
@@ -349,13 +442,11 @@ export function EtaWidget({
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
             <p className="text-xs font-semibold text-amber-900 leading-snug">
-              {suggestion.currentSpeedMph != null
-                ? `Setting this ETA would slow the truck from ~${suggestion.currentSpeedMph} mph to ~${suggestion.requiredSpeedMph} mph — unrealistically slow.`
-                : `This ETA requires the truck to average ~${suggestion.requiredSpeedMph} mph — unrealistically slow.`}
+              This ETA requires ~{suggestion.requiredSpeedMph} mph instead of the natural ~{suggestion.naturalSpeedMph} mph.
             </p>
           </div>
           <p className="text-xs text-amber-800">
-            Add <strong>{suggestion.stopCount} stop{suggestion.stopCount > 1 ? "s" : ""}</strong> ({suggestion.dwellPerStopMin} min each) to maintain realistic speed.
+            Add <strong>{suggestion.stopCount} stop{suggestion.stopCount > 1 ? "s" : ""}</strong> ({suggestion.dwellPerStopMin} min each) to keep the truck moving at ~{suggestion.naturalSpeedMph} mph.
           </p>
           <div className="flex gap-2">
             <button
@@ -384,13 +475,26 @@ export function EtaWidget({
 
       {/* Action buttons */}
       <div className="flex gap-2">
-        <button
-          onClick={handleSaveEta}
-          disabled={!etaUtcMoment || !isFuture}
-          className="flex-1 px-3 py-2 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 transition-colors"
-        >
-          {hasEta ? "Update ETA" : "Set ETA"}
-        </button>
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={`flex-1 ${disabled ? 'cursor-not-allowed' : ''}`}>
+                <button
+                  onClick={handleSaveEta}
+                  disabled={!isDirty || !isFuture || disabled}
+                  className="w-full px-3 py-2 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                >
+                  {hasEta ? "Update ETA" : "Set ETA"}
+                </button>
+              </span>
+            </TooltipTrigger>
+            {disabled && (
+              <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </TooltipProvider>
         {hasEta && (
           <button
             onClick={handleClearEta}

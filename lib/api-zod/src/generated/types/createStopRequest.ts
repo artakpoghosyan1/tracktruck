@@ -5,6 +5,7 @@
  * TrackTruck Live API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { CreateStopRequestStopType } from './createStopRequestStopType';
 
 export interface CreateStopRequest {
   name: string;
@@ -12,4 +13,5 @@ export interface CreateStopRequest {
   lng: number;
   durationMinutes?: number;
   sortOrder?: number;
+  stopType?: CreateStopRequestStopType;
 }
