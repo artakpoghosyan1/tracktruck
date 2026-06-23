@@ -514,7 +514,8 @@ router.patch("/routes/:id/speed", async (req, res) => {
     .where(eq(routesTable.id, id))
     .returning();
 
-  resumeRouteFromCurrentPosition(updated.id, 1.0, 1.0, { invalidateCache: false });
+  const speedChanged = truckSpeedMph !== undefined && truckSpeedMph !== existing.truckSpeedMph;
+  resumeRouteFromCurrentPosition(updated.id, 1.0, 1.0, { invalidateCache: speedChanged });
 
   // Always notify viewers so public pages pick up showSpeedPublic changes
   const routeUpdatedMsg = { type: "route_updated", routeId: updated.id };
