@@ -64,6 +64,19 @@ interface Waypoint {
   label: string;
 }
 
+function minDistToPolylineM(lat: number, lng: number, polyline: number[][]): number {
+  const R = 6371000;
+  let min = Infinity;
+  for (const pt of polyline) {
+    const dLat = (pt[1] - lat) * Math.PI / 180;
+    const dLng = (pt[0] - lng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * Math.PI / 180) * Math.cos(pt[1] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 async function reverseGeocode(lat: number, lng: number, mapboxToken?: string | null): Promise<string> {
   try {
     if (mapboxToken) {
@@ -425,6 +438,18 @@ export default function RouteBuilder() {
     setEtaTimezone(tz);
     if (!routeId) return;
     try {
+      // When clearing ETA, remove pacing stops — they only exist to balance ETA timing
+      if (!utc) {
+        const withoutPacing = stopsRef.current.filter(s => s.stopType !== 'pacing');
+        if (withoutPacing.length < stopsRef.current.length) {
+          stopsRef.current = withoutPacing;
+          setStops(withoutPacing);
+          stopDirtyRef.current = false;
+          const synced = await syncStopsToBackend(withoutPacing);
+          stopsRef.current = synced;
+          setStops(synced);
+        }
+      }
       // Flush unsaved stops first so the engine sees the new dwell time
       // before it recalculates the speed multiplier for the new ETA.
       if (stopDirtyRef.current) {
@@ -748,7 +773,7 @@ export default function RouteBuilder() {
           // Only auto-select the first option for completely new routes.
           // For existing routes, we want to maintain the selection provided by the init effect.
           if (!routeId) setSelectedIdx(0);
-          
+
           if (shouldSaveAfterRecalc.current) {
             shouldSaveAfterRecalc.current = false;
             waypointDirtyRef.current = false;
@@ -1031,6 +1056,19 @@ export default function RouteBuilder() {
         savedRoute = await createMut.mutateAsync({ data: payload });
       }
       
+      // Remove stops that fell off the new route before syncing to backend
+      const savedPolyline = polylineRef.current;
+      if (savedPolyline.length >= 2 && stopsRef.current.length > 0) {
+        const STOP_OFF_ROUTE_M = 500;
+        const validStops = stopsRef.current.filter(s => minDistToPolylineM(s.lat, s.lng, savedPolyline) <= STOP_OFF_ROUTE_M);
+        if (validStops.length < stopsRef.current.length) {
+          const removedCount = stopsRef.current.length - validStops.length;
+          stopsRef.current = validStops;
+          setStops(validStops);
+          toast({ title: `${removedCount} stop${removedCount > 1 ? 's' : ''} removed`, description: "Stops outside the new route were removed." });
+        }
+      }
+
       // Always sync stops to the backend cleanly!
       const bulkRes = await fetch(`/api/routes/${savedRoute.id}/stops/bulk`, {
         method: 'PUT',

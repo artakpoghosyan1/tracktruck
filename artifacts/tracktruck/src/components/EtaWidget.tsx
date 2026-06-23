@@ -341,6 +341,13 @@ export function EtaWidget({
       }
     }
 
+    // Distribute total dwell randomly so stops don't all look identical.
+    // Each weight is in [0.5, 1.5] — ±50% variance around the mean.
+    const totalDwellMin = dwellPerStopMin * stopCount;
+    const weights = Array.from({ length: stopCount }, () => 0.5 + Math.random());
+    const weightSum = weights.reduce((a, b) => a + b, 0);
+    const dwellMins = weights.map(w => Math.max(1, Math.round(w / weightSum * totalDwellMin)));
+
     const suggestedStops: SuggestedStop[] = [];
     for (let i = 0; i < stopCount; i++) {
       const fraction = startFraction + (endFraction - startFraction) / (stopCount + 1) * (i + 1);
@@ -349,7 +356,7 @@ export function EtaWidget({
         name: `Pacing Stop ${i + 1}`,
         lat: pos.lat,
         lng: pos.lng,
-        durationMinutes: dwellPerStopMin,
+        durationMinutes: dwellMins[i],
         stopType: "pacing",
       });
     }
