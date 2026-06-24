@@ -4,7 +4,6 @@ import Map, { Marker, MapRef } from "react-map-gl";
 import mapboxgl from "mapbox-gl";
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Truck, AlertTriangle, CheckCircle2, MapPin, Clock, Map as MapIcon, Gauge } from "lucide-react";
-import { formatInTimeZone } from "date-fns-tz";
 import { useAppStore } from "@/store/use-app-store";
 import { useGetPublicTrack, getGetPublicTrackQueryKey } from "@workspace/api-client-react";
 
@@ -22,8 +21,6 @@ interface SnapshotData {
   lng: number | null;
   bearing: number | null;
   speedMph?: number;
-  etaTargetUtc?: string | null;
-  etaTimezone?: string | null;
 }
 
 export default function PublicTracking() {
@@ -246,14 +243,6 @@ export default function PublicTracking() {
                 </div>
               )}
             </div>
-            {(activeSnapshot as SnapshotData | null)?.etaTargetUtc && (activeSnapshot as SnapshotData).etaTimezone && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
-                <Clock className="w-3 h-3" />
-                <span>ETA: <span className="font-semibold text-slate-800">
-                  {formatInTimeZone(new Date((activeSnapshot as SnapshotData).etaTargetUtc!), (activeSnapshot as SnapshotData).etaTimezone!, "h:mm a zzz")}
-                </span></span>
-              </div>
-            )}
           </div>
 
           {/* Stops */}
@@ -385,14 +374,6 @@ export default function PublicTracking() {
               </div>
             )}
           </div>
-          {(activeSnapshot as SnapshotData | null)?.etaTargetUtc && (activeSnapshot as SnapshotData).etaTimezone && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 border-t border-slate-100 pt-2">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
-              <span>ETA: <span className="font-semibold text-slate-800">
-                {formatInTimeZone(new Date((activeSnapshot as SnapshotData).etaTargetUtc!), (activeSnapshot as SnapshotData).etaTimezone!, "h:mm a zzz")}
-              </span></span>
-            </div>
-          )}
         </div>
       </div>
     </div>

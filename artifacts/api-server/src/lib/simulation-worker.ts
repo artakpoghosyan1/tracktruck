@@ -528,6 +528,8 @@ async function tick() {
     const displayBaseSpeedMph = baseSpeedMph * speedMultiplier;
     const targetSpeedMph = isAtAnyStop ? 0 : Math.max(0, displayBaseSpeedMph * fluctMult * combinedBrakeFactor);
     const currentSpeedMph = Math.max(0, Math.round(targetSpeedMph * rampFactor));
+    const naturalSpeedMph = Math.max(0, Math.round(isAtAnyStop ? 0 : baseSpeedMph * fluctMult * combinedBrakeFactor * rampFactor));
+    const publicSpeedMph = currentSpeedMph > 90 ? Math.min(naturalSpeedMph, 90) : currentSpeedMph;
 
     let displayLat = pos.lat, displayLng = pos.lng;
     if (pos.atStopName && pos.bearing != null) {
@@ -543,7 +545,7 @@ async function tick() {
       stopDwellRemainingS,
       distanceTraveledM: pos.distanceTraveledM,
       progressPercent: pos.progressPercent, lat: displayLat, lng: displayLng,
-      bearing: pos.bearing, speedMph: currentSpeedMph,
+      bearing: pos.bearing, speedMph: publicSpeedMph, realSpeedMph: currentSpeedMph,
       etaTargetUtc: route.etaTargetUtc?.toISOString() ?? null,
       etaTimezone: route.etaTimezone ?? null,
     };

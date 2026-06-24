@@ -254,7 +254,7 @@ export default function RouteBuilder() {
 
   // Live truck position for in-progress routes
   const [liveSnapshot, setLiveSnapshot] = useState<{
-    lat: number; lng: number; bearing: number; speedMph: number;
+    lat: number; lng: number; bearing: number; speedMph: number; realSpeedMph: number;
     atStopRouteStopId: number | null;
     stopDwellRemainingS: number | null;
     distanceTraveledM?: number;
@@ -315,7 +315,8 @@ export default function RouteBuilder() {
   const isCompleted = existingRoute?.status === 'completed';
   const routeLocked = (isLiveRoute && !routeChangeMode) || isCompleted;
   const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
-  const liveSpeedMph = liveSnapshot?.speedMph ?? null;
+  const liveSpeedMph = liveSnapshot?.realSpeedMph ?? null;
+const livePublicSpeedMph = liveSnapshot?.speedMph ?? null;
 
   // Remaining time: ETA-based if ETA is set, otherwise estimated from natural pace + progress
   const remainingTimeS = (() => {
@@ -613,6 +614,7 @@ export default function RouteBuilder() {
               lng: data.snapshot.lng,
               bearing: data.snapshot.bearing ?? 0,
               speedMph: data.snapshot.speedMph ?? 0,
+              realSpeedMph: data.snapshot.realSpeedMph ?? data.snapshot.speedMph ?? 0,
               atStopRouteStopId: data.snapshot.atStopRouteStopId ?? null,
               stopDwellRemainingS: data.snapshot.stopDwellRemainingS ?? null,
               distanceTraveledM: data.snapshot.distanceTraveledM ?? undefined,
@@ -651,6 +653,7 @@ export default function RouteBuilder() {
               lng: data.lng,
               bearing: data.bearing ?? 0,
               speedMph: data.speedMph ?? 0,
+              realSpeedMph: data.realSpeedMph ?? data.speedMph ?? 0,
               atStopRouteStopId: data.atStopRouteStopId ?? null,
               stopDwellRemainingS: data.stopDwellRemainingS ?? null,
               distanceTraveledM: data.distanceTraveledM ?? prev?.distanceTraveledM,
@@ -658,7 +661,7 @@ export default function RouteBuilder() {
             }));
           } else if (data.type === 'snapshot' && data.speedMph !== undefined) {
             // Partial update (e.g. pause) — update speed without moving the marker
-            setLiveSnapshot(prev => prev ? { ...prev, speedMph: data.speedMph } : prev);
+            setLiveSnapshot(prev => prev ? { ...prev, speedMph: data.speedMph, realSpeedMph: data.realSpeedMph ?? data.speedMph } : prev);
           } else if (data.type === "route_updated") {
             refetchRoute();
           }
@@ -1202,6 +1205,9 @@ export default function RouteBuilder() {
               <Gauge className="w-4 h-4 text-emerald-600" />
               <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedMph}</span>
               <span className="text-xs text-emerald-600">mph</span>
+              {livePublicSpeedMph !== null && livePublicSpeedMph !== liveSpeedMph && (
+                <span className="text-xs text-emerald-500">(on map: {livePublicSpeedMph} mph)</span>
+              )}
             </div>
           )}
 
