@@ -287,6 +287,13 @@ export default function RouteBuilder() {
   // Speed visibility for public tracking page
   const [showSpeedPublic, setShowSpeedPublic] = useState(true);
 
+  // Ticker so the remaining-time countdown badge re-renders every 10s independently of WS ticks
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 10_000);
+    return () => clearInterval(id);
+  }, []);
+
   // ETA state
   const [etaTargetUtc, setEtaTargetUtc] = useState<string | null>(null);
   const [etaTimezone, setEtaTimezone] = useState<string | null>(null);
@@ -471,6 +478,7 @@ const livePublicSpeedMph = liveSnapshot?.speedMph ?? null;
         toast({ title: "Failed to update ETA", description: err.message ?? "Unknown error", variant: "destructive" });
       } else {
         toast({ title: utc ? "ETA saved" : "ETA cleared" });
+        refetchRoute();
       }
     } catch (err: any) {
       toast({ title: "Failed to update ETA", description: err?.message ?? "", variant: "destructive" });
