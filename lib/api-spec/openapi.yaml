@@ -24,6 +24,8 @@ tags:
     description: Super Admin operations
   - name: org
     description: Organization admin operations
+  - name: utils
+    description: Utility operations
 
 paths:
   /healthz:
@@ -643,6 +645,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /utils/timezone:
+    get:
+      operationId: getTimezone
+      tags: [utils]
+      summary: Get IANA timezone for geographic coordinates
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: lng
+          in: query
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Timezone information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimezoneResponse"
+        "400":
+          description: Invalid coordinates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/allowed-emails:
     get:
       operationId: listAllowedEmails
@@ -1253,8 +1285,12 @@ components:
         updateCount:
           type: integer
           nullable: true
-        customDurationS:
-          type: integer
+        etaTargetUtc:
+          type: string
+          format: date-time
+          nullable: true
+        etaTimezone:
+          type: string
           nullable: true
       required:
         - id
@@ -1313,8 +1349,12 @@ components:
           type: number
         estimatedDurationS:
           type: number
-        customDurationS:
-          type: integer
+        etaTargetUtc:
+          type: string
+          format: date-time
+          nullable: true
+        etaTimezone:
+          type: string
           nullable: true
         shareToken:
           type: string
@@ -1403,6 +1443,10 @@ components:
           type: number
         sortOrder:
           type: integer
+        stopType:
+          type: string
+          enum: [stop, pacing]
+          default: stop
         createdAt:
           type: string
           format: date-time
@@ -1414,6 +1458,7 @@ components:
         - lng
         - durationMinutes
         - sortOrder
+        - stopType
         - createdAt
 
     CreateStopRequest:
@@ -1430,6 +1475,10 @@ components:
           default: 5
         sortOrder:
           type: integer
+        stopType:
+          type: string
+          enum: [stop, pacing]
+          default: stop
       required:
         - name
         - lat
@@ -1599,12 +1648,32 @@ components:
         atStopName:
           type: string
           nullable: true
+        etaTargetUtc:
+          type: string
+          format: date-time
+          nullable: true
+        etaTimezone:
+          type: string
+          nullable: true
       required:
         - routeId
         - timestamp
         - status
         - distanceTraveledM
         - progressPercent
+    TimezoneResponse:
+      type: object
+      properties:
+        timezone:
+          type: string
+          description: IANA timezone identifier (e.g. "America/Phoenix")
+        label:
+          type: string
+          description: Human-readable timezone label (e.g. "Mountain Standard Time")
+      required:
+        - timezone
+        - label
+
     AllowedEmail:
       type: object
       properties:

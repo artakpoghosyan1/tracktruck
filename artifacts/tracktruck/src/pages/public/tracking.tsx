@@ -7,6 +7,38 @@ import { Truck, AlertTriangle, CheckCircle2, MapPin, Clock, Map as MapIcon, Gaug
 import { useAppStore } from "@/store/use-app-store";
 import { useGetPublicTrack, getGetPublicTrackQueryKey } from "@workspace/api-client-react";
 
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+  const dφ = (lat2 - lat1) * Math.PI / 180, dλ = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function bearingDeg(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dλ = (lng2 - lng1) * Math.PI / 180;
+  const y = Math.sin(dλ) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180)
+    - Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dλ);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function posOnPolyline(polyline: number[][], distM: number): { lat: number; lng: number; bearing: number } | null {
+  if (polyline.length < 2) return null;
+  let cum = 0;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const [lng1, lat1] = polyline[i], [lng2, lat2] = polyline[i + 1];
+    const seg = haversineM(lat1, lng1, lat2, lng2);
+    if (cum + seg >= distM || i === polyline.length - 2) {
+      const t = seg > 0 ? Math.min((distM - cum) / seg, 1) : 0;
+      return { lat: lat1 + (lat2 - lat1) * t, lng: lng1 + (lng2 - lng1) * t, bearing: bearingDeg(lat1, lng1, lat2, lng2) };
+    }
+    cum += seg;
+  }
+  const last = polyline[polyline.length - 1];
+  return { lat: last[1], lng: last[0], bearing: 0 };
+}
+
 interface SnapshotData {
   type?: string;
   routeId: number;
@@ -44,11 +76,53 @@ export default function PublicTracking() {
     }
   }, [route?.status]);
 
-  // Snap marker directly to each server tick position — no interpolation
   const effectiveSnap = snapshot ?? (route?.snapshot as typeof snapshot | null | undefined) ?? null;
-  const markerPos = (effectiveSnap?.lat != null && effectiveSnap?.lng != null)
-    ? { lat: effectiveSnap.lat, lng: effectiveSnap.lng, bearing: effectiveSnap.bearing ?? 0 }
-    : null;
+
+  // Dead reckoning: advance position along polyline at publicSpeedMph every 1s.
+  // Position is never synced from server during in_progress to avoid jumps from ETA-inflated ticks.
+  // Only paused/at_stop/completed snaps use the server lat/lng directly.
+  const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number; bearing: number } | null>(null);
+  const localDistMRef = useRef<number | null>(null);
+  const publicSpeedMphRef = useRef<number>(0);
+  const statusRef = useRef<string>('');
+  const drLastTickRef = useRef<number>(performance.now());
+
+  useEffect(() => {
+    if (!effectiveSnap) return;
+    const status = effectiveSnap.status ?? '';
+    statusRef.current = status;
+    publicSpeedMphRef.current = effectiveSnap.speedMph ?? 0;
+    if (localDistMRef.current === null) {
+      // First snapshot — initialize
+      localDistMRef.current = effectiveSnap.distanceTraveledM ?? 0;
+      drLastTickRef.current = performance.now();
+    }
+    if (status === 'paused' || status === 'at_stop' || status === 'completed') {
+      // Snap to exact server position and sync distance
+      if (effectiveSnap.lat != null && effectiveSnap.lng != null) {
+        setMarkerPos({ lat: effectiveSnap.lat, lng: effectiveSnap.lng, bearing: effectiveSnap.bearing ?? 0 });
+      }
+      localDistMRef.current = effectiveSnap.distanceTraveledM ?? localDistMRef.current ?? 0;
+      drLastTickRef.current = performance.now();
+    }
+  }, [effectiveSnap]);
+
+  useEffect(() => {
+    const polyline = route?.polyline as number[][] | null | undefined;
+    if (!polyline || polyline.length < 2) return;
+    const id = setInterval(() => {
+      if (statusRef.current === 'paused' || statusRef.current === 'at_stop' || statusRef.current === 'completed') return;
+      if (localDistMRef.current === null) return;
+      const now = performance.now();
+      const dt = Math.min((now - drLastTickRef.current) / 1000, 1.5);
+      drLastTickRef.current = now;
+      const speedMs = publicSpeedMphRef.current * 1609.34 / 3600;
+      localDistMRef.current += speedMs * dt;
+      const pos = posOnPolyline(polyline, localDistMRef.current);
+      if (pos) setMarkerPos(pos);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [route?.polyline]);
 
   // Keep refetch in a ref so the WS effect doesn't need it as a dependency
   const refetchRef = useRef(refetchRoute);

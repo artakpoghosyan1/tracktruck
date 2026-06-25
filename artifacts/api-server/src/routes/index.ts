@@ -6,6 +6,7 @@ import simulationRouter from "./simulation";
 import publicRouter from "./public";
 import adminRouter from "./admin";
 import orgRouter from "./org";
+import utilsRouter from "./utils";
 
 const router: IRouter = Router();
 
@@ -15,6 +16,7 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(authRouter);
 router.use(publicRouter);
+router.use(utilsRouter);
 router.use(simulationRouter);
 router.use(routesRouter);
 router.use(adminRouter);

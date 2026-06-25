@@ -85,6 +85,8 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
       shareToken: shareLink?.token ?? null,
       shareLinkActive: shareLink?.active ?? false,
       updateCount: r.updateCount,
+      etaTargetUtc: r.etaTargetUtc?.toISOString() ?? null,
+      etaTimezone: r.etaTimezone ?? null,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     };
@@ -95,7 +97,7 @@ router.get("/routes", validate({ query: ListRoutesQueryParams }), async (req, re
 
 router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => {
   const authReq = req as AuthRequest;
-  const { name, startLat, startLng, endLat, endLng, truckSpeedMph = 60, polyline = [], speedProfile = [], customDurationS, waypoints = [] } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedMph = 60, polyline = [], speedProfile = [], waypoints = [] } = req.body as {
     name: string;
     startLat: number;
     startLng: number;
@@ -104,7 +106,6 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
     truckSpeedMph?: number;
     polyline?: number[][];
     speedProfile?: { distanceM: number; speedMph: number }[];
-    customDurationS?: number | null;
     waypoints?: { lat: number; lng: number; label: string }[];
   };
 
@@ -143,7 +144,6 @@ router.post("/routes", validate({ body: CreateRouteBody }), async (req, res) => 
       waypoints,
       distanceM,
       estimatedDurationS,
-      customDurationS: customDurationS ?? null,
       status: "draft",
     })
     .returning();
@@ -227,11 +227,12 @@ router.get("/routes/:id", validate({ params: GetRouteParams }), async (req, res)
       lng: s.lng,
       durationMinutes: s.durationMinutes,
       sortOrder: s.sortOrder,
+      stopType: s.stopType,
       createdAt: s.createdAt.toISOString(),
     })),
     updateCount: route.updateCount,
-    customDurationS: route.customDurationS,
-    customDurationEnabled: route.customDurationEnabled,
+    etaTargetUtc: route.etaTargetUtc?.toISOString() ?? null,
+    etaTimezone: route.etaTimezone ?? null,
     showSpeedPublic: route.showSpeedPublic,
     createdAt: route.createdAt.toISOString(),
     updatedAt: route.updatedAt.toISOString(),
@@ -268,7 +269,7 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     return;
   }
 
-  const { name, startLat, startLng, endLat, endLng, truckSpeedMph, polyline, speedProfile, customDurationS, waypoints } = req.body as {
+  const { name, startLat, startLng, endLat, endLng, truckSpeedMph, polyline, speedProfile, waypoints } = req.body as {
     name?: string;
     startLat?: number;
     startLng?: number;
@@ -277,7 +278,6 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
     truckSpeedMph?: number;
     polyline?: number[][];
     speedProfile?: { distanceM: number; speedMph: number }[];
-    customDurationS?: number | null;
     waypoints?: { lat: number; lng: number; label: string }[];
   };
 
@@ -314,9 +314,8 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
   const polylineChanged = polyline !== undefined && JSON.stringify(polyline) !== JSON.stringify(existing.polyline);
   const nameChanged = name !== undefined && name !== existing.name;
   const speedChanged = truckSpeedMph !== undefined && truckSpeedMph !== existing.truckSpeedMph;
-  const durationChanged = customDurationS !== undefined && customDurationS !== existing.customDurationS;
 
-  const anythingChanged = hasPointChanges || polylineChanged || nameChanged || speedChanged || durationChanged;
+  const anythingChanged = hasPointChanges || polylineChanged || nameChanged || speedChanged;
 
   const [updated] = await db
     .update(routesTable)
@@ -330,7 +329,6 @@ router.put("/routes/:id", validate({ params: UpdateRouteParams, body: UpdateRout
       ...(polyline !== undefined && { polyline }),
       ...(speedProfile !== undefined && { speedProfile }),
       ...(waypoints !== undefined && { waypoints }),
-      ...(customDurationS !== undefined && { customDurationS: customDurationS ?? null }),
       distanceM,
       estimatedDurationS,
       updatedAt: new Date(),
@@ -454,12 +452,29 @@ router.patch("/routes/:id/speed", async (req, res) => {
     return;
   }
 
-  const { truckSpeedMph, customDurationS, customDurationEnabled, showSpeedPublic } = req.body as {
+  const { truckSpeedMph, etaTargetUtc, etaTimezone, showSpeedPublic } = req.body as {
     truckSpeedMph?: number;
-    customDurationS?: number | null;
-    customDurationEnabled?: boolean;
+    etaTargetUtc?: string | null;
+    etaTimezone?: string | null;
     showSpeedPublic?: boolean;
   };
+
+  // Validate ETA: when set it must be a future datetime; etaTimezone required with it
+  if (etaTargetUtc !== undefined && etaTargetUtc !== null) {
+    const etaDate = new Date(etaTargetUtc);
+    if (isNaN(etaDate.getTime())) {
+      res.status(400).json({ error: "invalid_eta", message: "etaTargetUtc must be a valid ISO date-time string" });
+      return;
+    }
+    if (etaDate.getTime() <= Date.now()) {
+      res.status(400).json({ error: "invalid_eta", message: "Arrival time must be in the future" });
+      return;
+    }
+    if (!etaTimezone) {
+      res.status(400).json({ error: "invalid_eta", message: "etaTimezone is required when setting etaTargetUtc" });
+      return;
+    }
+  }
 
   const newSpeed = truckSpeedMph ?? existing.truckSpeedMph;
   const newPolyline = existing.polyline ?? [];
@@ -488,8 +503,8 @@ router.patch("/routes/:id/speed", async (req, res) => {
     .update(routesTable)
     .set({
       ...(truckSpeedMph !== undefined && { truckSpeedMph }),
-      ...(customDurationS !== undefined && { customDurationS }),
-      ...(customDurationEnabled !== undefined && { customDurationEnabled }),
+      ...(etaTargetUtc !== undefined && { etaTargetUtc: etaTargetUtc ? new Date(etaTargetUtc) : null }),
+      ...(etaTimezone !== undefined && { etaTimezone: etaTimezone ?? null }),
       ...(showSpeedPublic !== undefined && { showSpeedPublic }),
       distanceM,
       estimatedDurationS,
@@ -499,13 +514,8 @@ router.patch("/routes/:id/speed", async (req, res) => {
     .where(eq(routesTable.id, id))
     .returning();
 
-  // Pass old/new multipliers so the worker can compute the exact current position
-  // from real-time elapsed (not stale DB distanceTraveledM) and convert it correctly.
-  const oldMult = (existing.customDurationEnabled && existing.customDurationS && existing.customDurationS > 0 && existing.estimatedDurationS > 0)
-    ? existing.estimatedDurationS / existing.customDurationS : 1.0;
-  const newMult = (updated.customDurationEnabled && updated.customDurationS && updated.customDurationS > 0 && updated.estimatedDurationS > 0)
-    ? updated.estimatedDurationS / updated.customDurationS : 1.0;
-  resumeRouteFromCurrentPosition(updated.id, oldMult, newMult, { invalidateCache: false });
+  const speedChanged = truckSpeedMph !== undefined && truckSpeedMph !== existing.truckSpeedMph;
+  resumeRouteFromCurrentPosition(updated.id, 1.0, 1.0, { invalidateCache: speedChanged });
 
   // Always notify viewers so public pages pick up showSpeedPublic changes
   const routeUpdatedMsg = { type: "route_updated", routeId: updated.id };
@@ -521,8 +531,8 @@ router.patch("/routes/:id/speed", async (req, res) => {
   res.json({
     id: updated.id,
     truckSpeedMph: updated.truckSpeedMph,
-    customDurationS: updated.customDurationS,
-    customDurationEnabled: updated.customDurationEnabled,
+    etaTargetUtc: updated.etaTargetUtc?.toISOString() ?? null,
+    etaTimezone: updated.etaTimezone ?? null,
     showSpeedPublic: updated.showSpeedPublic,
     estimatedDurationS: updated.estimatedDurationS,
     distanceM: updated.distanceM,
@@ -615,7 +625,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
   }
 
   const { stops } = req.body as {
-    stops: { name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number }[];
+    stops: { name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number; stopType?: string }[];
   };
 
   const [{ oldCount }] = await db
@@ -637,6 +647,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
         lng: s.lng,
         durationMinutes: Math.max(1, s.durationMinutes ?? 5),
         sortOrder: s.sortOrder ?? i,
+        stopType: (s.stopType === "pacing" ? "pacing" : "stop") as "stop" | "pacing",
       }));
       insertedStops = await tx.insert(routeStopsTable).values(values).returning();
     }
@@ -672,6 +683,7 @@ router.put("/routes/:id/stops/bulk", async (req, res) => {
       lng: s.lng,
       durationMinutes: s.durationMinutes,
       sortOrder: s.sortOrder,
+      stopType: s.stopType,
     })),
   });
 });

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
-import { db, allowedEmailsTable, organizationsTable } from "@workspace/db";
+import { eq, sql, and } from "drizzle-orm";
+import { db, allowedEmailsTable, organizationsTable, usersTable } from "@workspace/db";
 import { validate } from "../middlewares/validate";
 import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth";
 import { ROOT_ADMIN_EMAIL } from "../lib/config";
@@ -63,6 +63,19 @@ router.post("/admin/allowed-emails", requireAdmin(), validate({
     const [org] = await db.select({ id: organizationsTable.id }).from(organizationsTable).where(eq(organizationsTable.id, organizationId)).limit(1);
     if (!org) {
       res.status(400).json({ error: "bad_request", message: "Organization not found." });
+      return;
+    }
+  }
+
+  // Prevent a second org_admin on the same org
+  if (role === "org_admin" && organizationId) {
+    const [existingAdmin] = await db
+      .select({ id: allowedEmailsTable.id })
+      .from(allowedEmailsTable)
+      .where(and(eq(allowedEmailsTable.organizationId, organizationId), eq(allowedEmailsTable.role, "org_admin")))
+      .limit(1);
+    if (existingAdmin) {
+      res.status(409).json({ error: "conflict", message: "This organization already has an admin assigned." });
       return;
     }
   }
@@ -170,6 +183,8 @@ router.delete("/admin/allowed-emails/:email", requireAdmin(), async (req, res) =
     res.status(404).json({ error: "not_found", message: "Email not found in allowed list" });
     return;
   }
+
+  await db.delete(usersTable).where(eq(usersTable.email, lowerEmail));
 
   res.json({ message: "Email removed successfully" });
 });

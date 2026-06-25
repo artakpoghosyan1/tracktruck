@@ -38,11 +38,11 @@ export default function OrgAdmin() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addEmail, setAddEmail] = useState("");
   const [addName, setAddName] = useState("");
-  const [addRouteLimit, setAddRouteLimit] = useState(0);
+  const [addRouteLimit, setAddRouteLimit] = useState<number | ''>(0);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<AllowedEmail | null>(null);
-  const [editRouteLimit, setEditRouteLimit] = useState(0);
+  const [editRouteLimit, setEditRouteLimit] = useState<number | ''>(0);
   const [editName, setEditName] = useState("");
 
   const [isRemoveConfirmOpen, setIsRemoveConfirmOpen] = useState(false);
@@ -102,7 +102,7 @@ export default function OrgAdmin() {
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    addMutation.mutate({ data: { email: addEmail, name: addName || undefined, routeLimit: addRouteLimit } });
+    addMutation.mutate({ data: { email: addEmail, name: addName || undefined, routeLimit: addRouteLimit === '' ? 0 : addRouteLimit } });
   };
 
   const openEdit = (member: AllowedEmail) => {
@@ -115,7 +115,7 @@ export default function OrgAdmin() {
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMember) return;
-    updateMutation.mutate({ email: editingMember.email, data: { routeLimit: editRouteLimit, name: editName || undefined } });
+    updateMutation.mutate({ email: editingMember.email, data: { routeLimit: editRouteLimit === '' ? 0 : editRouteLimit, name: editName || undefined } });
   };
 
   const openRemove = (email: string) => {
@@ -275,7 +275,7 @@ export default function OrgAdmin() {
             <DialogTitle>Add Member</DialogTitle>
             <DialogDescription>
               Invite a new user to your organization. They'll be able to sign up once added.
-              {org && <span className="block mt-1 text-primary font-medium">{remaining} routes available to allocate.</span>}
+              {org && <span className="block mt-1 text-primary font-bold">{remaining} routes available to allocate.</span>}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAdd} className="space-y-4 mt-2">
@@ -307,7 +307,13 @@ export default function OrgAdmin() {
               <input
                 type="number"
                 value={addRouteLimit}
-                onChange={(e) => setAddRouteLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { setAddRouteLimit(''); return; }
+                  const n = parseInt(raw, 10);
+                  if (!isNaN(n)) setAddRouteLimit(Math.max(0, n));
+                }}
+                onBlur={() => { if (addRouteLimit === '') setAddRouteLimit(0); }}
                 min={0}
                 max={addMax}
                 className="w-full px-3 py-2 bg-background border border-border/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -319,7 +325,7 @@ export default function OrgAdmin() {
               </button>
               <button
                 type="submit"
-                disabled={addMutation.isPending || addRouteLimit > addMax}
+                disabled={addMutation.isPending || (addRouteLimit !== '' && addRouteLimit > addMax)}
                 className="px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add Member"}
@@ -336,7 +342,7 @@ export default function OrgAdmin() {
             <DialogTitle>Edit Quota</DialogTitle>
             <DialogDescription>
               {editingMember?.email}
-              {org && <span className="block mt-1 text-primary font-medium">{editMax} routes available to allocate.</span>}
+              {org && <span className="block mt-1 text-primary font-bold">{editMax} routes available to allocate.</span>}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpdate} className="space-y-4 mt-2">
@@ -357,7 +363,13 @@ export default function OrgAdmin() {
               <input
                 type="number"
                 value={editRouteLimit}
-                onChange={(e) => setEditRouteLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { setEditRouteLimit(''); return; }
+                  const n = parseInt(raw, 10);
+                  if (!isNaN(n)) setEditRouteLimit(Math.max(0, n));
+                }}
+                onBlur={() => { if (editRouteLimit === '') setEditRouteLimit(0); }}
                 min={0}
                 max={editMax}
                 className="w-full px-3 py-2 bg-background border border-border/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -369,7 +381,7 @@ export default function OrgAdmin() {
               </button>
               <button
                 type="submit"
-                disabled={updateMutation.isPending || editRouteLimit > editMax}
+                disabled={updateMutation.isPending || (editRouteLimit !== '' && editRouteLimit > editMax)}
                 className="px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}

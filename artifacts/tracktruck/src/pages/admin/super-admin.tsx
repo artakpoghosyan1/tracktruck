@@ -10,7 +10,6 @@ import {
   Loader2,
   Mail,
   Shield,
-  AlertCircle,
   Edit,
   User,
   Building2,
@@ -83,7 +82,7 @@ export default function SuperAdmin() {
   const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
   const [orgName, setOrgName] = useState("");
   const [orgIsPaid, setOrgIsPaid] = useState(false);
-  const [orgRouteLimit, setOrgRouteLimit] = useState(0);
+  const [orgRouteLimit, setOrgRouteLimit] = useState<number | ''>(0);
 
   // Redirect if not at least an admin/manager
   if (!user || (user.role !== 'super_admin' && user.role !== 'admin')) {
@@ -217,7 +216,7 @@ export default function SuperAdmin() {
       setEditingOrg(org);
       setOrgName(org.name);
       setOrgIsPaid(org.isPaid);
-      setOrgRouteLimit(org.routeLimit);
+      setOrgRouteLimit(org.routeLimit ?? 0);
     } else {
       setEditingOrg(null);
       setOrgName(""); setOrgIsPaid(false); setOrgRouteLimit(0);
@@ -228,14 +227,14 @@ export default function SuperAdmin() {
   const handleSaveOrg = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingOrg) {
-      updateOrgMutation.mutate({ id: editingOrg.id, data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit } });
+      updateOrgMutation.mutate({ id: editingOrg.id, data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit === '' ? 0 : orgRouteLimit } });
     } else {
-      createOrgMutation.mutate({ data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit } });
+      createOrgMutation.mutate({ data: { name: orgName, isPaid: orgIsPaid, routeLimit: orgRouteLimit === '' ? 0 : orgRouteLimit } });
     }
   };
 
   const clientEmails = allowedEmails?.filter(item =>
-    (item.role === 'user' || item.role === 'org_admin') &&
+    (item.role === 'org_admin' || (item.role === 'user' && !item.organizationId)) &&
     (item.email.toLowerCase().includes(searchTerm.toLowerCase()) || (item.name ?? "").toLowerCase().includes(searchTerm.toLowerCase()))
   ) || [];
 
@@ -393,7 +392,7 @@ export default function SuperAdmin() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-muted-foreground uppercase tracking-tight">Active Clients</p>
-                    <p className="text-2xl font-bold">{allowedEmails?.filter(e => e.role === 'user' || e.role === 'org_admin').length || 0}</p>
+                    <p className="text-2xl font-bold">{allowedEmails?.filter(e => e.role === 'org_admin' || (e.role === 'user' && !e.organizationId)).length || 0}</p>
                   </div>
                 </div>
               </div>
@@ -492,9 +491,14 @@ export default function SuperAdmin() {
                                   <SelectValue placeholder="Select organization" />
                                 </SelectTrigger>
                                 <SelectContent className="rounded-xl">
-                                  {(organizations ?? []).map((org) => (
-                                    <SelectItem key={org.id} value={org.id.toString()}>{org.name}</SelectItem>
-                                  ))}
+                                  {(organizations ?? []).map((org) => {
+                                    const hasAdmin = allowedEmails?.some(e => e.organizationId === org.id && e.role === 'org_admin');
+                                    return (
+                                      <SelectItem key={org.id} value={org.id.toString()} disabled={hasAdmin}>
+                                        {org.name}{hasAdmin ? ' (admin already assigned)' : ''}
+                                      </SelectItem>
+                                    );
+                                  })}
                                 </SelectContent>
                               </Select>
                             </div>
@@ -655,20 +659,26 @@ export default function SuperAdmin() {
                                   )}
                                 </td>
                                 <td className="px-8 py-6">
-                                  <div className="flex flex-col gap-1.5 min-w-[120px]">
-                                    <div className="flex justify-between items-end">
-                                      <span className="text-[10px] font-bold uppercase text-muted-foreground">{item.routeLimit} Allocated</span>
-                                      <span className={`text-xs font-bold ${((item as any).usedRoutes || 0) >= item.routeLimit ? 'text-destructive' : 'text-primary'}`}>
-                                        {item.routeLimit - ((item as any).usedRoutes || 0)} left
-                                      </span>
-                                    </div>
-                                    <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                                      <div
-                                        className={`h-full transition-all rounded-full ${((item as any).usedRoutes || 0) >= item.routeLimit ? 'bg-destructive' : 'bg-primary'}`}
-                                        style={{ width: `${Math.min(100, (((item as any).usedRoutes || 0) / Math.max(1, item.routeLimit)) * 100)}%` }}
-                                      />
-                                    </div>
-                                  </div>
+                                  {(() => {
+                                    const total = org ? org.routeLimit : item.routeLimit;
+                                    const used = org ? org.usedRoutes : ((item as any).usedRoutes || 0);
+                                    return (
+                                      <div className="flex flex-col gap-1.5 min-w-[120px]">
+                                        <div className="flex justify-between items-end">
+                                          <span className="text-[10px] font-bold uppercase text-muted-foreground">{total} Allocated</span>
+                                          <span className={`text-xs font-bold ${used >= total ? 'text-destructive' : 'text-primary'}`}>
+                                            {total - used} left
+                                          </span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                                          <div
+                                            className={`h-full transition-all rounded-full ${used >= total ? 'bg-destructive' : 'bg-primary'}`}
+                                            style={{ width: `${Math.min(100, (used / Math.max(1, total)) * 100)}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="px-8 py-6">
                                   {org ? (
@@ -740,7 +750,9 @@ export default function SuperAdmin() {
           <DialogHeader>
             <DialogTitle className="text-2xl font-display font-bold">Manage Client</DialogTitle>
             <DialogDescription>
-              Update tier limits or manually adjust route usage for <strong>{editingItem?.email}</strong>.
+              {editingItem?.organizationId
+                ? <>Update account details for <strong>{editingItem?.email}</strong>.</>
+                : <>Update tier limits or manually adjust route usage for <strong>{editingItem?.email}</strong>.</>}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
@@ -757,41 +769,50 @@ export default function SuperAdmin() {
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center px-1">
-                <label className="text-sm font-semibold">Route Capacity (Tier)</label>
-                <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">{editRouteLimit} Routes</span>
+            {!editingItem?.organizationId && (
+              <>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-sm font-semibold">Route Capacity (Tier)</label>
+                    <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">{editRouteLimit} Routes</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[25, 50, 100].map(val => (
+                      <button
+                        key={val}
+                        onClick={() => setEditRouteLimit(val)}
+                        className={`py-2 rounded-xl text-xs font-bold border-2 transition-all ${editRouteLimit === val ? 'bg-primary border-primary text-primary-foreground' : 'border-border/50 hover:border-primary/50'}`}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="number"
+                    value={editRouteLimit}
+                    onChange={(e) => setEditRouteLimit(parseInt(e.target.value) || 0)}
+                    className="w-full px-4 py-3 bg-background border-2 border-border/50 rounded-xl focus:border-primary outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-sm font-semibold">Routes Consumed</label>
+                    <button onClick={() => setEditUsedRoutes(0)} className="text-[10px] font-bold text-primary hover:underline uppercase">Reset Usage</button>
+                  </div>
+                  <input
+                    type="number"
+                    value={editUsedRoutes}
+                    onChange={(e) => setEditUsedRoutes(parseInt(e.target.value) || 0)}
+                    className="w-full px-4 py-3 bg-background border-2 border-border/50 rounded-xl focus:border-primary outline-none transition-all"
+                  />
+                </div>
+              </>
+            )}
+            {editingItem?.organizationId && (
+              <div className="p-4 bg-muted/30 rounded-2xl border border-border/50 text-sm text-muted-foreground">
+                Route quota is managed at the organization level. Edit the organization to adjust limits.
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {[25, 50, 100].map(val => (
-                  <button
-                    key={val}
-                    onClick={() => setEditRouteLimit(val)}
-                    className={`py-2 rounded-xl text-xs font-bold border-2 transition-all ${editRouteLimit === val ? 'bg-primary border-primary text-primary-foreground' : 'border-border/50 hover:border-primary/50'}`}
-                  >
-                    {val}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="number"
-                value={editRouteLimit}
-                onChange={(e) => setEditRouteLimit(parseInt(e.target.value) || 0)}
-                className="w-full px-4 py-3 bg-background border-2 border-border/50 rounded-xl focus:border-primary outline-none transition-all"
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center px-1">
-                <label className="text-sm font-semibold">Routes Consumed</label>
-                <button onClick={() => setEditUsedRoutes(0)} className="text-[10px] font-bold text-primary hover:underline uppercase">Reset Usage</button>
-              </div>
-              <input
-                type="number"
-                value={editUsedRoutes}
-                onChange={(e) => setEditUsedRoutes(parseInt(e.target.value) || 0)}
-                className="w-full px-4 py-3 bg-background border-2 border-border/50 rounded-xl focus:border-primary outline-none transition-all"
-              />
-            </div>
+            )}
           </div>
           <DialogFooter>
             <button onClick={() => setIsEditModalOpen(false)} className="px-6 py-3 rounded-xl font-bold text-sm hover:bg-muted transition-all">Cancel</button>
@@ -840,7 +861,13 @@ export default function SuperAdmin() {
               <input
                 type="number"
                 value={orgRouteLimit}
-                onChange={(e) => setOrgRouteLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { setOrgRouteLimit(''); return; }
+                  const n = parseInt(raw, 10);
+                  if (!isNaN(n)) setOrgRouteLimit(Math.max(0, n));
+                }}
+                onBlur={() => { if (orgRouteLimit === '') setOrgRouteLimit(0); }}
                 min={0}
                 className="w-full px-4 py-3 bg-background border-2 border-border/50 rounded-xl focus:border-primary outline-none transition-all"
               />

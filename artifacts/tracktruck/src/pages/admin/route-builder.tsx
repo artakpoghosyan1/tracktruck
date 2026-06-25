@@ -15,6 +15,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { MapboxPrompt } from "@/components/MapboxPrompt";
 import { AddressSearch } from "@/components/AddressSearch";
+import { EtaWidget } from "@/components/EtaWidget";
 import { useAppStore } from "@/store/use-app-store";
 import { useToast } from "@/hooks/use-toast";
 import { fetchDirections, fetchOsrmDirections, type RouteOption, type SpeedSegment } from "@/lib/mapbox-utils";
@@ -25,6 +26,17 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface RoutePoint { lng: number; lat: number; label: string; }
 
@@ -34,6 +46,7 @@ interface Stop {
   lat: number;
   lng: number;
   durationMinutes: number;
+  stopType?: "stop" | "pacing";
   dbId?: number;
 }
 
@@ -49,6 +62,19 @@ interface Waypoint {
   lat: number;
   lng: number;
   label: string;
+}
+
+function minDistToPolylineM(lat: number, lng: number, polyline: number[][]): number {
+  const R = 6371000;
+  let min = Infinity;
+  for (const pt of polyline) {
+    const dLat = (pt[1] - lat) * Math.PI / 180;
+    const dLng = (pt[0] - lng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * Math.PI / 180) * Math.cos(pt[1] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    if (d < min) min = d;
+  }
+  return min;
 }
 
 async function reverseGeocode(lat: number, lng: number, mapboxToken?: string | null): Promise<string> {
@@ -143,25 +169,31 @@ function SortableStopItem({ stop, index, onRemove, onChangeName, onChangeDuratio
   countdownSec: number | null;
 }) {
   const isCurrentStop = stop.dbId != null && stop.dbId === atStopRouteStopId;
+  const isPacing = stop.stopType === "pacing";
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id });
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 bg-muted/40 border border-border/60 rounded-xl p-3 group transition-all ${isCurrentStop ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : ''}`}>
+    <div ref={setNodeRef} style={style} className={`flex flex-col gap-2 rounded-xl p-3 group transition-all border ${isCurrentStop ? 'ring-2 ring-amber-500 bg-amber-50/50 border-amber-200 shadow-sm' : isPacing ? 'bg-amber-50/30 border-amber-200/60' : 'bg-muted/40 border-border/60'}`}>
       <div className="flex gap-2 items-center">
         <div {...attributes} {...listeners} className="cursor-grab p-1 text-muted-foreground hover:text-foreground shrink-0">
           <GripVertical className="w-4 h-4" />
         </div>
-        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-500 text-amber-500 animate-pulse' : 'border-primary text-primary'}`}>
+        <div className={`w-6 h-6 rounded-full bg-white border-2 flex items-center justify-center font-bold text-xs shrink-0 ${isCurrentStop ? 'border-amber-500 text-amber-500 animate-pulse' : isPacing ? 'border-amber-400 text-amber-500' : 'border-primary text-primary'}`}>
           {index + 1}
         </div>
         <div className="flex-1 min-w-0 space-y-1">
-          <input
-            type="text"
-            value={stop.name}
-            onChange={(e) => onChangeName(stop.id, e.target.value)}
-            className="w-full bg-transparent font-medium outline-none text-sm placeholder:text-muted-foreground truncate"
-            placeholder="Stop name"
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={stop.name}
+              onChange={(e) => onChangeName(stop.id, e.target.value)}
+              className="flex-1 min-w-0 bg-transparent font-medium outline-none text-sm placeholder:text-muted-foreground truncate"
+              placeholder="Stop name"
+            />
+            {isPacing && (
+              <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">pacing</span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="w-3 h-3 shrink-0" />
             <input
@@ -212,20 +244,21 @@ export default function RouteBuilder() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [showAddWaypoint, setShowAddWaypoint] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [speedSaving, setSpeedSaving] = useState(false);
   const [trafficMode, setTrafficMode] = useState(false);
   const trafficModeRef = useRef(false);
   const [trafficLoading, setTrafficLoading] = useState(false);
-  const preTrafficStateRef = useRef<{ enabled: boolean; durationS: number | null } | null>(null);
+  const preTrafficStateRef = useRef<{ speedMph: number } | null>(null);
   const [isRouting, setIsRouting] = useState(false);
   const [mapClick, setMapClick] = useState<MapClickState | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Live truck position for in-progress routes
   const [liveSnapshot, setLiveSnapshot] = useState<{
-    lat: number; lng: number; bearing: number; speedMph: number;
+    lat: number; lng: number; bearing: number; speedMph: number; realSpeedMph: number;
     atStopRouteStopId: number | null;
     stopDwellRemainingS: number | null;
+    distanceTraveledM?: number;
+    progressPercent?: number;
   } | null>(null);
 
   const [countdownSec, setCountdownSec] = useState<number | null>(null);
@@ -248,14 +281,22 @@ export default function RouteBuilder() {
 
   // Route-change gate: when live, start/end are locked until admin explicitly unlocks
   const [routeChangeMode, setRouteChangeMode] = useState(false);
+  const routeChangeModeRef = useRef(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-
-  // Custom simulation duration
-  const [useCustomDuration, setUseCustomDuration] = useState(false);
-  const [customDurationMinutes, setCustomDurationMinutes] = useState(0);
 
   // Speed visibility for public tracking page
   const [showSpeedPublic, setShowSpeedPublic] = useState(true);
+
+  // Ticker so the remaining-time countdown badge re-renders every 10s independently of WS ticks
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ETA state
+  const [etaTargetUtc, setEtaTargetUtc] = useState<string | null>(null);
+  const [etaTimezone, setEtaTimezone] = useState<string | null>(null);
 
   // Route alternatives
   const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
@@ -281,7 +322,27 @@ export default function RouteBuilder() {
   const isCompleted = existingRoute?.status === 'completed';
   const routeLocked = (isLiveRoute && !routeChangeMode) || isCompleted;
   const isActivatedRoute = ['ready', 'in_progress', 'paused', 'completed'].includes(existingRoute?.status ?? '');
-  const liveSpeedMph = liveSnapshot?.speedMph ?? null;
+  const liveSpeedMph = liveSnapshot?.realSpeedMph ?? null;
+const livePublicSpeedMph = liveSnapshot?.speedMph ?? null;
+
+  // Remaining time: ETA-based if ETA is set, otherwise estimated from natural pace + progress
+  const remainingTimeS = (() => {
+    if (!isLiveRoute) return null;
+    if (etaTargetUtc) {
+      const r = (new Date(etaTargetUtc).getTime() - Date.now()) / 1000;
+      return r > 0 ? Math.round(r) : null;
+    }
+    const progress = liveSnapshot?.progressPercent;
+    if (progress == null || duration <= 0) return null;
+    return Math.round(duration * (1 - progress / 100));
+  })();
+  const remainingLabel = (() => {
+    if (remainingTimeS == null || remainingTimeS < 0) return null;
+    if (remainingTimeS < 60) return "<1m";
+    const h = Math.floor(remainingTimeS / 3600);
+    const m = Math.round((remainingTimeS % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  })();
 
   const { user } = useAppStore();
   const isUser = user?.role === 'user';
@@ -357,27 +418,12 @@ export default function RouteBuilder() {
       let body: Record<string, unknown>;
 
       if (nextMode) {
-        const estimatedDurationS: number = er.estimatedDurationS ?? 0;
-        const truckSpeedMph: number = er.truckSpeedMph ?? 60;
+        // Save current speed so we can restore it when turning off
+        preTrafficStateRef.current = { speedMph: er.truckSpeedMph ?? 60 };
         const trafficSpeedMph = Math.floor(Math.random() * 4) + 19; // 19–22 mph
-        // Worker scales speed profile to truckSpeedMph average, then multiplies by
-        // speedMultiplier = estimatedDurationS / customDurationS.
-        // Setting customDurationS = estimatedDurationS * (truckSpeedMph / trafficSpeedMph)
-        // makes speedMultiplier = trafficSpeedMph / truckSpeedMph, so effective speed = trafficSpeedMph.
-        const customDurationS = Math.round(estimatedDurationS * (truckSpeedMph / trafficSpeedMph));
-        // Save current state so we can restore it when turning off
-        preTrafficStateRef.current = {
-          enabled: er.customDurationEnabled ?? false,
-          durationS: er.customDurationS ?? null,
-        };
-        body = { customDurationEnabled: true, customDurationS };
+        body = { truckSpeedMph: trafficSpeedMph };
       } else {
-        // Restore whatever was active before traffic mode
-        const prev = preTrafficStateRef.current;
-        body = {
-          customDurationEnabled: prev?.enabled ?? false,
-          customDurationS: prev?.durationS ?? null,
-        };
+        body = { truckSpeedMph: preTrafficStateRef.current?.speedMph ?? 60 };
       }
 
       const res = await fetch(`/api/routes/${routeId}/speed`, {
@@ -393,6 +439,71 @@ export default function RouteBuilder() {
     } finally {
       setTrafficLoading(false);
     }
+  };
+
+  const handleEtaChange = async (utc: string | null, tz: string | null) => {
+    setEtaTargetUtc(utc);
+    setEtaTimezone(tz);
+    if (!routeId) return;
+    try {
+      // When clearing ETA, remove pacing stops — they only exist to balance ETA timing
+      if (!utc) {
+        const withoutPacing = stopsRef.current.filter(s => s.stopType !== 'pacing');
+        if (withoutPacing.length < stopsRef.current.length) {
+          stopsRef.current = withoutPacing;
+          setStops(withoutPacing);
+          stopDirtyRef.current = false;
+          const synced = await syncStopsToBackend(withoutPacing);
+          stopsRef.current = synced;
+          setStops(synced);
+        }
+      }
+      // Flush unsaved stops first so the engine sees the new dwell time
+      // before it recalculates the speed multiplier for the new ETA.
+      if (stopDirtyRef.current) {
+        stopDirtyRef.current = false;
+        const synced = await syncStopsToBackend(stopsRef.current);
+        setStops(synced);
+      }
+      const res = await fetch(`/api/routes/${routeId}/speed`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
+        },
+        body: JSON.stringify({ etaTargetUtc: utc, etaTimezone: tz }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Failed to update ETA", description: err.message ?? "Unknown error", variant: "destructive" });
+      } else {
+        toast({ title: utc ? "ETA saved" : "ETA cleared" });
+        refetchRoute();
+      }
+    } catch (err: any) {
+      toast({ title: "Failed to update ETA", description: err?.message ?? "", variant: "destructive" });
+    }
+  };
+
+  const handleAddSuggestedStops = async (newStops: { name: string; lat: number; lng: number; durationMinutes: number; stopType?: "stop" | "pacing" }[]) => {
+    const added = newStops.map(s => ({
+      id: `client-${Date.now()}-${Math.random()}`,
+      name: s.name,
+      lat: s.lat,
+      lng: s.lng,
+      durationMinutes: s.durationMinutes,
+      stopType: s.stopType ?? "pacing" as const,
+    }));
+    const nextStops = [...stopsRef.current, ...added];
+    stopsRef.current = nextStops;
+    setStops(nextStops);
+    stopDirtyRef.current = false;
+    // Sync stops to DB — the server invalidates the simulation cache so the engine
+    // recalculates speedMultiplier with the new stop dwells on its next tick.
+    const synced = await syncStopsToBackend(nextStops);
+    stopsRef.current = synced;
+    setStops(synced);
+    toast({ title: `${added.length} stop${added.length > 1 ? 's' : ''} added`, description: "Speed adjusted to match natural pace." });
   };
 
   const initializedRouteIdRef = useRef<number | null>(null);
@@ -414,6 +525,7 @@ export default function RouteBuilder() {
       lng: s.lng,
       lat: s.lat,
       durationMinutes: s.durationMinutes,
+      stopType: ((s as any).stopType === "pacing" ? "pacing" : "stop") as "stop" | "pacing",
       sortOrder: s.sortOrder,
     })));
     setWaypoints(((existingRoute as any).waypoints ?? []).map((w: { lat: number; lng: number; label: string }, i: number) => ({
@@ -426,10 +538,15 @@ export default function RouteBuilder() {
     }
   }, [existingRoute, liveSnapshot]);
 
-  // Restore the saved route as a single option
+  // Keep ref in sync so effects can read current value without stale closures
+  useEffect(() => { routeChangeModeRef.current = routeChangeMode; }, [routeChangeMode]);
+
+  // Restore the saved route as a single option.
+  // Skip route geometry/duration while user is actively changing the route —
+  // a WS-triggered refetch would otherwise overwrite the freshly computed options.
   useEffect(() => {
     if (!existingRoute) return;
-    if (existingRoute.polyline?.length) {
+    if (existingRoute.polyline?.length && !routeChangeModeRef.current) {
       setRouteOptions([{
         polyline: existingRoute.polyline,
         distanceM: existingRoute.distanceM || 0,
@@ -439,15 +556,10 @@ export default function RouteBuilder() {
       setSelectedIdx(0);
     }
 
-    if (!trafficModeRef.current) {
-      const er2 = existingRoute as any;
-      setUseCustomDuration(er2.customDurationEnabled ?? false);
-      if (er2.customDurationS) {
-        setCustomDurationMinutes(Math.round(er2.customDurationS / 60));
-      }
-    }
     const er = existingRoute as any;
     setShowSpeedPublic(er.showSpeedPublic ?? true);
+    setEtaTargetUtc(er.etaTargetUtc ?? null);
+    setEtaTimezone(er.etaTimezone ?? null);
   }, [existingRoute]);
 
   // Reset traffic mode when route changes or goes non-live
@@ -510,8 +622,11 @@ export default function RouteBuilder() {
               lng: data.snapshot.lng,
               bearing: data.snapshot.bearing ?? 0,
               speedMph: data.snapshot.speedMph ?? 0,
+              realSpeedMph: data.snapshot.realSpeedMph ?? data.snapshot.speedMph ?? 0,
               atStopRouteStopId: data.snapshot.atStopRouteStopId ?? null,
               stopDwellRemainingS: data.snapshot.stopDwellRemainingS ?? null,
+              distanceTraveledM: data.snapshot.distanceTraveledM ?? undefined,
+              progressPercent: data.snapshot.progressPercent ?? undefined,
             });
           }
         })
@@ -546,12 +661,15 @@ export default function RouteBuilder() {
               lng: data.lng,
               bearing: data.bearing ?? 0,
               speedMph: data.speedMph ?? 0,
+              realSpeedMph: data.realSpeedMph ?? data.speedMph ?? 0,
               atStopRouteStopId: data.atStopRouteStopId ?? null,
               stopDwellRemainingS: data.stopDwellRemainingS ?? null,
+              distanceTraveledM: data.distanceTraveledM ?? prev?.distanceTraveledM,
+              progressPercent: data.progressPercent ?? prev?.progressPercent,
             }));
           } else if (data.type === 'snapshot' && data.speedMph !== undefined) {
             // Partial update (e.g. pause) — update speed without moving the marker
-            setLiveSnapshot(prev => prev ? { ...prev, speedMph: data.speedMph } : prev);
+            setLiveSnapshot(prev => prev ? { ...prev, speedMph: data.speedMph, realSpeedMph: data.realSpeedMph ?? data.speedMph } : prev);
           } else if (data.type === "route_updated") {
             refetchRoute();
           }
@@ -666,7 +784,7 @@ export default function RouteBuilder() {
           // Only auto-select the first option for completely new routes.
           // For existing routes, we want to maintain the selection provided by the init effect.
           if (!routeId) setSelectedIdx(0);
-          
+
           if (shouldSaveAfterRecalc.current) {
             shouldSaveAfterRecalc.current = false;
             waypointDirtyRef.current = false;
@@ -760,7 +878,7 @@ export default function RouteBuilder() {
     }
   }, []);
 
-  type SavedStopRow = { id: number; name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number };
+  type SavedStopRow = { id: number; name: string; lat: number; lng: number; durationMinutes: number; sortOrder: number; stopType?: "stop" | "pacing" };
 
   /** Bulk-replace stops and sync returned DB ids back into local state. */
   const syncStopsToBackend = useCallback(async (nextStops: Stop[]): Promise<Stop[]> => {
@@ -780,6 +898,7 @@ export default function RouteBuilder() {
             lng: s.lng,
             durationMinutes: Math.max(1, s.durationMinutes || 5),
             sortOrder: i,
+            stopType: s.stopType ?? "stop",
           })),
         }),
       });
@@ -797,6 +916,7 @@ export default function RouteBuilder() {
           dbId: saved.id,
           id: String(saved.id),
           durationMinutes: saved.durationMinutes,
+          stopType: saved.stopType ?? s.stopType ?? "stop",
         };
       });
     } catch (err: unknown) {
@@ -938,8 +1058,6 @@ export default function RouteBuilder() {
         polyline: polylineRef.current,
         speedProfile,
         waypoints: waypointsRef.current.map(w => ({ lat: w.lat, lng: w.lng, label: w.label })),
-        // customDurationS is sent only on create; for existing routes, use Update Speed button
-        ...(!routeId && { customDurationS: useCustomDuration && customDurationMinutes > 0 ? customDurationMinutes * 60 : null }),
       };
 
       let savedRoute;
@@ -949,6 +1067,19 @@ export default function RouteBuilder() {
         savedRoute = await createMut.mutateAsync({ data: payload });
       }
       
+      // Remove stops that fell off the new route before syncing to backend
+      const savedPolyline = polylineRef.current;
+      if (savedPolyline.length >= 2 && stopsRef.current.length > 0) {
+        const STOP_OFF_ROUTE_M = 500;
+        const validStops = stopsRef.current.filter(s => minDistToPolylineM(s.lat, s.lng, savedPolyline) <= STOP_OFF_ROUTE_M);
+        if (validStops.length < stopsRef.current.length) {
+          const removedCount = stopsRef.current.length - validStops.length;
+          stopsRef.current = validStops;
+          setStops(validStops);
+          toast({ title: `${removedCount} stop${removedCount > 1 ? 's' : ''} removed`, description: "Stops outside the new route were removed." });
+        }
+      }
+
       // Always sync stops to the backend cleanly!
       const bulkRes = await fetch(`/api/routes/${savedRoute.id}/stops/bulk`, {
         method: 'PUT',
@@ -960,6 +1091,7 @@ export default function RouteBuilder() {
             lng: s.lng,
             durationMinutes: Math.max(1, s.durationMinutes || 5),
             sortOrder: i,
+            stopType: s.stopType ?? "stop",
           })),
         }),
       });
@@ -972,7 +1104,7 @@ export default function RouteBuilder() {
         const synced = stopsRef.current.map((s, i) => {
           const saved = bulkData.stops![i];
           if (!saved) return s;
-          return { ...s, dbId: saved.id, id: String(saved.id), durationMinutes: saved.durationMinutes };
+          return { ...s, dbId: saved.id, id: String(saved.id), durationMinutes: saved.durationMinutes, stopType: saved.stopType ?? s.stopType ?? "stop" };
         });
         setStops(synced);
         stopsRef.current = synced;
@@ -1081,6 +1213,18 @@ export default function RouteBuilder() {
               <Gauge className="w-4 h-4 text-emerald-600" />
               <span className="text-sm font-bold text-emerald-800 tabular-nums">{liveSpeedMph}</span>
               <span className="text-xs text-emerald-600">mph</span>
+              {livePublicSpeedMph !== null && livePublicSpeedMph !== liveSpeedMph && (
+                <span className="text-xs text-emerald-500">(on map: {livePublicSpeedMph} mph)</span>
+              )}
+            </div>
+          )}
+
+          {/* Remaining duration badge */}
+          {remainingLabel && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-bold text-blue-800 tabular-nums">{remainingLabel}</span>
+              <span className="text-xs text-blue-600">left</span>
             </div>
           )}
 
@@ -1266,141 +1410,60 @@ export default function RouteBuilder() {
 
                 {/* Traffic mode — only shown when route is live */}
                 {isLiveRoute && (
-                  <label className="flex items-center justify-between cursor-pointer py-1">
-                    <div className="flex items-center gap-2">
-                      <Car className="w-4 h-4 text-orange-500" />
-                      <span className="text-sm font-medium text-foreground">Heavy traffic</span>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={trafficMode}
-                      disabled={trafficLoading}
-                      onClick={handleTrafficToggle}
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${trafficMode ? 'bg-orange-500' : 'bg-gray-300'}`}
-                    >
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${trafficMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                    </button>
-                  </label>
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <label className={`flex items-center justify-between py-1 ${routeChangeMode ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                          <div className="flex items-center gap-2">
+                            <Car className="w-4 h-4 text-orange-500" />
+                            <span className="text-sm font-medium text-foreground">Heavy traffic</span>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={trafficMode}
+                            disabled={trafficLoading || routeChangeMode}
+                            onClick={handleTrafficToggle}
+                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 disabled:pointer-events-none ${trafficMode ? 'bg-orange-500' : 'bg-gray-300'}`}
+                          >
+                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${trafficMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          </button>
+                        </label>
+                      </TooltipTrigger>
+                      {routeChangeMode && (
+                        <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                          <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
 
-                <hr className="border-border/40" />
-
-                {/* Custom simulation time */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useCustomDuration}
-                    onChange={(e) => setUseCustomDuration(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
-                  />
-                  <span className="text-sm font-semibold text-foreground">Custom simulation time</span>
-                  {!trafficMode && (existingRoute as any)?.customDurationEnabled && (
-                    <span className="ml-auto text-xs font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Active</span>
-                  )}
-                </label>
-
-                {useCustomDuration && (
-                  <div className="space-y-3 animate-in fade-in slide-in-from-top-1">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="60"
-                        value={customDurationMinutes || ''}
-                        onChange={(e) => setCustomDurationMinutes(parseInt(e.target.value) || 0)}
-                        disabled={!useCustomDuration}
-                        className="w-24 px-3 py-1.5 rounded-lg border border-border bg-background focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none text-sm transition-all"
-                      />
-                      <span className="text-sm text-muted-foreground">minutes total</span>
-                    </div>
-                    <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
-                      <p className="text-xs font-bold text-amber-900 leading-snug flex gap-1.5 items-start">
-                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-px" />
-                        Warning: This will artificially scale the truck's speed to hit this exact duration.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Standalone Update Speed button — only shown for existing routes */}
-                {routeId && existingRoute && (
-                  <button
-                    onClick={async () => {
-                      setSpeedSaving(true);
-                      try {
-                        const res = await fetch(`/api/routes/${routeId}/speed`, {
-                          method: 'PATCH',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
-                          },
-                          body: JSON.stringify({
-                            truckSpeedMph: 60,
-                            customDurationS: customDurationMinutes > 0 ? customDurationMinutes * 60 : null,
-                            customDurationEnabled: useCustomDuration,
-                            showSpeedPublic,
-                          }),
-                        });
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          throw new Error(err.message || 'Failed to update speed');
-                        }
-                        toast({ title: "Settings Updated", description: "Speed settings have been saved." });
-                        await refetchRoute();
-                      } catch (err: any) {
-                        toast({ title: "Update failed", description: err?.message || "Failed to update", variant: "destructive" });
-                      } finally {
-                        setSpeedSaving(false);
-                      }
-                    }}
-                    disabled={speedSaving || !useCustomDuration}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-primary text-white hover:bg-primary/90 font-semibold text-sm transition-colors disabled:opacity-50 shadow-sm"
-                  >
-                    {speedSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />}
-                    Update Speed Settings
-                  </button>
-                )}
-
-                {/* Reset to default — only shown when a custom duration is saved */}
-                {routeId && existingRoute && !trafficMode && (existingRoute as any).customDurationEnabled && (
-                  <button
-                    onClick={async () => {
-                      setSpeedSaving(true);
-                      try {
-                        const res = await fetch(`/api/routes/${routeId}/speed`, {
-                          method: 'PATCH',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('tracktruck_token')}`,
-                          },
-                          body: JSON.stringify({
-                            customDurationS: null,
-                            customDurationEnabled: false,
-                          }),
-                        });
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          throw new Error(err.message || 'Failed to reset');
-                        }
-                        toast({ title: "Speed Reset", description: "Simulation speed reset to map-based default." });
-                        setUseCustomDuration(false);
-                        setCustomDurationMinutes(30);
-                        initializedRouteIdRef.current = null;
-                        await refetchRoute();
-                      } catch (err: any) {
-                        toast({ title: "Reset failed", description: err?.message || "Failed to reset", variant: "destructive" });
-                      } finally {
-                        setSpeedSaving(false);
-                      }
-                    }}
-                    disabled={speedSaving}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border text-muted-foreground hover:bg-muted/40 font-semibold text-sm transition-colors disabled:opacity-50"
-                  >
-                    Reset to Default
-                  </button>
-                )}
               </div>
+
+              {/* ETA Widget */}
+              {!isCompleted && (
+                <div className="space-y-3 p-3.5 rounded-xl border border-border bg-card">
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1 block">
+                    Destination ETA
+                  </label>
+                  <EtaWidget
+                    endLat={end?.lat ?? null}
+                    endLng={end?.lng ?? null}
+                    distanceM={distance}
+                    estimatedDurationS={duration}
+                    stops={stops}
+                    etaTargetUtc={etaTargetUtc}
+                    etaTimezone={etaTimezone}
+                    routeStatus={existingRoute?.status ?? 'draft'}
+                    liveSnapshot={liveSnapshot}
+                    onEtaChange={handleEtaChange}
+                    onAddSuggestedStops={handleAddSuggestedStops}
+                    polyline={polyline}
+                    disabled={routeChangeMode}
+                  />
+                </div>
+              )}
             </div>
 
             <hr className="border-border/50" />
@@ -1597,27 +1660,41 @@ export default function RouteBuilder() {
                     </h3>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      if (showAddWaypoint) {
-                        // Trigger recalc + auto-save only if waypoints actually changed
-                        if (waypointDirtyRef.current) shouldSaveAfterRecalc.current = true;
-                        setShowAddWaypoint(false);
-                        setMapClick(null);
-                      } else {
-                        setShowAddWaypoint(true);
-                        setShowAddStop(false);
-                        setMapClick(null);
-                      }
-                    }}
-                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddWaypoint
-                      ? 'bg-violet-600/80 text-white hover:bg-violet-600/70 shadow-violet-200'
-                      : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-200'
-                    }`}
-                  >
-                    {showAddWaypoint ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    {showAddWaypoint ? 'Done Adding Waypoints' : 'Add Waypoint'}
-                  </button>
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={`w-full block ${routeChangeMode ? 'cursor-not-allowed' : ''}`}>
+                          <button
+                            onClick={() => {
+                              if (showAddWaypoint) {
+                                // Trigger recalc + auto-save only if waypoints actually changed
+                                if (waypointDirtyRef.current) shouldSaveAfterRecalc.current = true;
+                                setShowAddWaypoint(false);
+                                setMapClick(null);
+                              } else {
+                                setShowAddWaypoint(true);
+                                setShowAddStop(false);
+                                setMapClick(null);
+                              }
+                            }}
+                            disabled={routeChangeMode}
+                            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none ${showAddWaypoint
+                              ? 'bg-violet-600/80 text-white hover:bg-violet-600/70 shadow-violet-200'
+                              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-200'
+                            }`}
+                          >
+                            {showAddWaypoint ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                            {showAddWaypoint ? 'Done Adding Waypoints' : 'Add Waypoint'}
+                          </button>
+                        </span>
+                      </TooltipTrigger>
+                      {routeChangeMode && (
+                        <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                          <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
 
                   {showAddWaypoint && (
                     <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
@@ -1644,7 +1721,8 @@ export default function RouteBuilder() {
                               shouldSaveAfterRecalc.current = true;
                               setWaypoints(ws => ws.filter(w => w.id !== wp.id));
                             }}
-                            className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors shrink-0"
+                            disabled={routeChangeMode}
+                            className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors shrink-0 disabled:opacity-40 disabled:pointer-events-none"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1669,30 +1747,74 @@ export default function RouteBuilder() {
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Stops ({stops.length})
                 </h3>
+                {stops.length > 0 && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button disabled={routeChangeMode} className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 transition-colors disabled:opacity-40 disabled:pointer-events-none">
+                        <Trash2 className="w-3 h-3" />
+                        Remove all
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Remove all stops?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will delete all {stops.length} stop{stops.length > 1 ? "s" : ""} from this route. This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={async () => {
+                            setStops([]);
+                            if (routeId) await syncStopsToBackend([]);
+                          }}
+                        >
+                          Remove all
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
 
-              <button
-                onClick={() => { 
-                  if (showAddStop) {
-                    const dirty = stopDirtyRef.current;
-                    stopDirtyRef.current = false;
-                    setShowAddStop(false);
-                    setHoverSnap(null);
-                    setMapClick(null);
-                    if (dirty) setTimeout(() => handleSave(false, true), 50);
-                  } else {
-                    setShowAddStop(true);
-                    setMapClick(null);
-                  }
-                }}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm ${showAddStop
-                  ? 'bg-teal-600/80 text-white hover:bg-teal-600/70 shadow-teal-200'
-                  : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-200'
-                }`}
-              >
-                {showAddStop ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
-              </button>
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className={`w-full block ${routeChangeMode ? 'cursor-not-allowed' : ''}`}>
+                      <button
+                        onClick={() => {
+                          if (showAddStop) {
+                            const dirty = stopDirtyRef.current;
+                            stopDirtyRef.current = false;
+                            setShowAddStop(false);
+                            setHoverSnap(null);
+                            setMapClick(null);
+                            if (dirty) setTimeout(() => handleSave(false, true), 50);
+                          } else {
+                            setShowAddStop(true);
+                            setMapClick(null);
+                          }
+                        }}
+                        disabled={routeChangeMode}
+                        className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none ${showAddStop
+                          ? 'bg-teal-600/80 text-white hover:bg-teal-600/70 shadow-teal-200'
+                          : 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-200'
+                        }`}
+                      >
+                        {showAddStop ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                        {showAddStop ? 'Done Adding Stops' : 'Add Stop'}
+                      </button>
+                    </span>
+                  </TooltipTrigger>
+                  {routeChangeMode && (
+                    <TooltipContent side="bottom" className="bg-slate-900 text-white border-none py-2 px-3 rounded-lg shadow-xl max-w-[220px]">
+                      <p className="text-xs font-medium leading-relaxed">Save route changes first</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
 
               {showAddStop && (
                 <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 space-y-2">
@@ -1858,7 +1980,7 @@ export default function RouteBuilder() {
               {/* Stop markers */}
               {stops.map((stop, i) => (
                 <Marker key={stop.id} longitude={stop.lng} latitude={stop.lat} anchor="center">
-                  <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center text-primary shadow-lg border-2 border-primary font-bold text-xs">
+                  <div className={`w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-lg border-2 font-bold text-xs ${stop.stopType === "pacing" ? "border-amber-500 text-amber-500" : "border-primary text-primary"}`}>
                     {i + 1}
                   </div>
                 </Marker>
