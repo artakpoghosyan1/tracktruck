@@ -2,8 +2,19 @@ import { createServer } from "http";
 import app from "./app";
 import { setupWebSocket } from "./routes/ws";
 import { startSimulationEngine } from "./lib/simulation-engine";
-import { db, routesTable, shareLinksTable } from "@workspace/db";
+import { db, routesTable, shareLinksTable, closeDbPool } from "@workspace/db";
 import { sql, and, eq, isNull, lt, inArray } from "drizzle-orm";
+
+// Safety nets: if a database connection error (or any other error) is ever
+// emitted somewhere without a handler, log it instead of letting the
+// process crash. The pool itself now has its own 'error' listener
+// (see lib/db), but this guards against any other stray emitters.
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[process] Uncaught exception:", err);
+});
 
 const rawPort = process.env["PORT"] ?? "8080";
 const port = Number(rawPort);
@@ -67,3 +78,32 @@ ensureSpeedProfileColumn().then(() => {
     console.log(`Server listening on port ${port}`);
   });
 });
+
+// Graceful shutdown: stop accepting new connections, let in-flight requests
+// finish, then close the database pool before exiting. This avoids
+// abruptly killing DB connections mid-query, which is what surfaces as
+// "Connection terminated unexpectedly" errors on the pool.
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`[shutdown] Received ${signal}, draining server...`);
+
+  const forceExitTimer = setTimeout(() => {
+    console.error("[shutdown] Timed out waiting for drain, forcing exit.");
+    process.exit(1);
+  }, 10_000);
+
+  server.close(async () => {
+    console.log("[shutdown] HTTP server closed, closing DB pool...");
+    await closeDbPool();
+    clearTimeout(forceExitTimer);
+    console.log("[shutdown] Shutdown complete.");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
